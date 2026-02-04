@@ -2,10 +2,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use base64::Engine;
 use blake3::Hasher;
 use blstrs::{G1Affine, G1Projective, G2Projective, Scalar};
 use ff::Field;
 use group::{Curve, Group};
+use serde::{Deserialize, Serialize};
 
 use crate::bls::{g2_from_bytes, g2_to_bytes, scalar_from_id, scalar_random};
 use crate::encoding::{dec_bytes, enc_bytes, enc_len};
@@ -78,6 +80,8 @@ pub struct DkgState {
     // Dealer commitments and received shares.
     commitments: HashMap<PartyId, Vec<G2Projective>>,
     shares: HashMap<PartyId, (Scalar, Scalar)>,
+    // Shares received before we learned the sender's sig_pk.
+    pending_shares: HashMap<PartyId, Vec<DkgShare>>,
     // Local complaints against dealers.
     complaints: HashSet<PartyId>,
     // Complaints received from others: dealer -> set of accusers.
@@ -86,6 +90,34 @@ pub struct DkgState {
     invalid_dealers: HashSet<PartyId>,
     // Verified message digests for transcript hashing.
     msg_hashes: Vec<[u8; 32]>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DkgSnapshot {
+    pub params: Params,
+    pub me: PartyInfo,
+    pub valid: bool,
+    pub a_coeffs: Vec<String>,
+    pub b_coeffs: Vec<String>,
+    pub sig_sk: String,
+    pub sig_pk: String,
+    pub sig_pks: Vec<(PartyId, String)>,
+    pub commitments: Vec<(PartyId, Vec<String>)>,
+    pub shares: Vec<(PartyId, (String, String))>,
+    pub pending_shares: Vec<(PartyId, Vec<DkgShareSnapshot>)>,
+    pub complaints: Vec<PartyId>,
+    pub complaints_from: Vec<(PartyId, Vec<PartyId>)>,
+    pub invalid_dealers: Vec<PartyId>,
+    pub msg_hashes: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DkgShareSnapshot {
+    pub from: PartyId,
+    pub to: PartyId,
+    pub f_i: String,
+    pub r_i: String,
+    pub sig: String,
 }
 
 impl DkgState {
@@ -112,6 +144,7 @@ impl DkgState {
             sig_pks: HashMap::new(),
             commitments: HashMap::new(),
             shares: HashMap::new(),
+            pending_shares: HashMap::new(),
             complaints: HashSet::new(),
             complaints_from: HashMap::new(),
             invalid_dealers: HashSet::new(),
@@ -204,16 +237,31 @@ impl DkgState {
                 }
                 self.sig_pks.insert(from, c.sig_pk);
                 self.commitments.insert(from, c.coeffs);
+                if let Some(pend) = self.pending_shares.remove(&from) {
+                    for s in pend {
+                        if s.to != self.me.id {
+                            continue;
+                        }
+                        if !self.verify_share(&s)? {
+                            return Err(Error::InvalidMessage);
+                        }
+                        self.shares.insert(from, (s.f_i, s.r_i));
+                    }
+                }
             }
             DkgMessage::Share(s) => {
                 // Verify signature and store share for this party.
                 if s.from != from || s.to != self.me.id {
                     return Err(Error::InvalidMessage);
                 }
-                if !self.verify_share(&s)? {
-                    return Err(Error::InvalidMessage);
+                if self.sig_pks.contains_key(&from) {
+                    if !self.verify_share(&s)? {
+                        return Err(Error::InvalidMessage);
+                    }
+                    self.shares.insert(from, (s.f_i, s.r_i));
+                } else {
+                    self.pending_shares.entry(from).or_default().push(*s);
                 }
-                self.shares.insert(from, (s.f_i, s.r_i));
             }
             DkgMessage::Complaint(c) => {
                 // Verify complaint signature and track accuser.
@@ -376,6 +424,189 @@ impl DkgState {
             },
         ))
     }
+}
+
+impl DkgState {
+    pub fn to_snapshot(&self) -> DkgSnapshot {
+        DkgSnapshot {
+            params: self.params,
+            me: self.me,
+            valid: self.valid,
+            a_coeffs: self.a_coeffs.iter().map(scalar_b64).collect(),
+            b_coeffs: self.b_coeffs.iter().map(scalar_b64).collect(),
+            sig_sk: scalar_b64(&self.sig_sk),
+            sig_pk: g2_b64(&self.sig_pk),
+            sig_pks: self
+                .sig_pks
+                .iter()
+                .map(|(id, pk)| (*id, g2_b64(pk)))
+                .collect(),
+            commitments: self
+                .commitments
+                .iter()
+                .map(|(id, coeffs)| (*id, coeffs.iter().map(g2_b64).collect()))
+                .collect(),
+            shares: self
+                .shares
+                .iter()
+                .map(|(id, (f, r))| (*id, (scalar_b64(f), scalar_b64(r))))
+                .collect(),
+            pending_shares: self
+                .pending_shares
+                .iter()
+                .map(|(id, shares)| (*id, shares.iter().map(share_snapshot).collect::<Vec<_>>()))
+                .collect(),
+            complaints: self.complaints.iter().copied().collect(),
+            complaints_from: self
+                .complaints_from
+                .iter()
+                .map(|(id, acc)| (*id, acc.iter().copied().collect()))
+                .collect(),
+            invalid_dealers: self.invalid_dealers.iter().copied().collect(),
+            msg_hashes: self
+                .msg_hashes
+                .iter()
+                .map(|h| base64::engine::general_purpose::STANDARD.encode(h))
+                .collect(),
+        }
+    }
+
+    pub fn from_snapshot(s: DkgSnapshot) -> Result<Self, Error> {
+        let mut state = DkgState::new(s.params, s.me);
+        state.valid = s.valid;
+        state.a_coeffs = s
+            .a_coeffs
+            .iter()
+            .map(|v| scalar_from_b64(v))
+            .collect::<Result<_, _>>()?;
+        state.b_coeffs = s
+            .b_coeffs
+            .iter()
+            .map(|v| scalar_from_b64(v))
+            .collect::<Result<_, _>>()?;
+        state.sig_sk = scalar_from_b64(&s.sig_sk)?;
+        state.sig_pk = g2_from_b64(&s.sig_pk)?;
+        state.sig_pks = s
+            .sig_pks
+            .iter()
+            .map(|(id, pk)| Ok((*id, g2_from_b64(pk)?)))
+            .collect::<Result<_, Error>>()?;
+        state.commitments = s
+            .commitments
+            .iter()
+            .map(|(id, coeffs)| {
+                let decoded = coeffs
+                    .iter()
+                    .map(|v| g2_from_b64(v))
+                    .collect::<Result<_, _>>()?;
+                Ok((*id, decoded))
+            })
+            .collect::<Result<_, Error>>()?;
+        state.shares = s
+            .shares
+            .iter()
+            .map(|(id, (f, r))| Ok((*id, (scalar_from_b64(f)?, scalar_from_b64(r)?))))
+            .collect::<Result<_, Error>>()?;
+        state.pending_shares = s
+            .pending_shares
+            .iter()
+            .map(|(id, shares)| {
+                let decoded = shares
+                    .iter()
+                    .map(share_from_snapshot)
+                    .collect::<Result<_, _>>()?;
+                Ok((*id, decoded))
+            })
+            .collect::<Result<_, Error>>()?;
+        state.complaints = s.complaints.into_iter().collect();
+        state.complaints_from = s
+            .complaints_from
+            .into_iter()
+            .map(|(id, acc)| (id, acc.into_iter().collect()))
+            .collect();
+        state.invalid_dealers = s.invalid_dealers.into_iter().collect();
+        state.msg_hashes = s
+            .msg_hashes
+            .iter()
+            .map(|h| {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(h.as_bytes())
+                    .map_err(|_| Error::InvalidEncoding)?;
+                if bytes.len() != 32 {
+                    return Err(Error::InvalidEncoding);
+                }
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                Ok(arr)
+            })
+            .collect::<Result<_, Error>>()?;
+        Ok(state)
+    }
+}
+
+fn scalar_b64(s: &Scalar) -> String {
+    base64::engine::general_purpose::STANDARD.encode(s.to_bytes_be())
+}
+
+fn scalar_from_b64(s: &str) -> Result<Scalar, Error> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(s.as_bytes())
+        .map_err(|_| Error::InvalidEncoding)?;
+    if bytes.len() != 32 {
+        return Err(Error::InvalidEncoding);
+    }
+    let mut raw = [0u8; 32];
+    raw.copy_from_slice(&bytes);
+    Option::<Scalar>::from(Scalar::from_bytes_be(&raw)).ok_or(Error::InvalidEncoding)
+}
+
+fn g2_b64(p: &G2Projective) -> String {
+    base64::engine::general_purpose::STANDARD.encode(g2_to_bytes(p))
+}
+
+fn g2_from_b64(s: &str) -> Result<G2Projective, Error> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(s.as_bytes())
+        .map_err(|_| Error::InvalidEncoding)?;
+    g2_from_bytes(&bytes)
+}
+
+fn g1_b64(p: &G1Projective) -> String {
+    base64::engine::general_purpose::STANDARD.encode(p.to_affine().to_compressed())
+}
+
+fn g1_from_b64(s: &str) -> Result<G1Projective, Error> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(s.as_bytes())
+        .map_err(|_| Error::InvalidEncoding)?;
+    if bytes.len() != 48 {
+        return Err(Error::InvalidEncoding);
+    }
+    let mut raw = [0u8; 48];
+    raw.copy_from_slice(&bytes);
+    let affine =
+        Option::<G1Affine>::from(G1Affine::from_compressed(&raw)).ok_or(Error::InvalidEncoding)?;
+    Ok(G1Projective::from(affine))
+}
+
+fn share_snapshot(s: &DkgShare) -> DkgShareSnapshot {
+    DkgShareSnapshot {
+        from: s.from,
+        to: s.to,
+        f_i: scalar_b64(&s.f_i),
+        r_i: scalar_b64(&s.r_i),
+        sig: g1_b64(&s.sig),
+    }
+}
+
+fn share_from_snapshot(s: &DkgShareSnapshot) -> Result<DkgShare, Error> {
+    Ok(DkgShare {
+        from: s.from,
+        to: s.to,
+        f_i: scalar_from_b64(&s.f_i)?,
+        r_i: scalar_from_b64(&s.r_i)?,
+        sig: g1_from_b64(&s.sig)?,
+    })
 }
 
 pub struct BlsDkgScheme;

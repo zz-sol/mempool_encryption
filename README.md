@@ -59,6 +59,11 @@ Enable logging:
 RUST_LOG=info cargo run --example roundtrip
 ```
 
+Filesystem-based end-to-end (7 parties, threshold 4):
+```bash
+scripts/e2e.sh
+```
+
 ## Notes / Limitations
 - The network/transport layer is not implemented; tests and examples simulate message delivery in-memory.
 - DKG timeouts and consensus on QUAL are outside the scope of this crate.
