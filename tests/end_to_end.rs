@@ -1,15 +1,13 @@
-use mempool_encryption::dkg::{compute_pk_from_shares, BlsDkgScheme, DkgState};
+use mempool_encryption::dkg::{BlsDkgScheme, DkgState, compute_pk_from_shares};
+use mempool_encryption::kem::{BlsPlaintext, BlsTag};
 use mempool_encryption::scheme::{SetupProtocol, ThresholdRelease};
 use mempool_encryption::types::{Params, PartyInfo};
-use mempool_encryption::kem::{BlsPlaintext, BlsTag};
 use rand_core::SeedableRng;
 
 #[test]
 fn dkg_encrypt_decrypt_roundtrip() {
     let params = Params { n: 3, t: 2 };
-    let parties: Vec<PartyInfo> = (1..=params.n)
-        .map(|id| PartyInfo { id })
-        .collect();
+    let parties: Vec<PartyInfo> = (1..=params.n).map(|id| PartyInfo { id }).collect();
 
     let mut states: Vec<DkgState> = parties
         .iter()
@@ -31,8 +29,8 @@ fn dkg_encrypt_decrypt_roundtrip() {
     for i in 0..states.len() {
         let inbox = std::mem::take(&mut inboxes[i]);
         for (from, msg) in inbox {
-            let _ = BlsDkgScheme::handle_message(&mut states[i], from, msg)
-                .expect("handle_message");
+            let _ =
+                BlsDkgScheme::handle_message(&mut states[i], from, msg).expect("handle_message");
         }
     }
 
@@ -62,24 +60,22 @@ fn dkg_encrypt_decrypt_roundtrip() {
     let pt = BlsPlaintext(b"hello".to_vec());
     let mut rng = rand_chacha::ChaCha20Rng::from_entropy();
 
-    let ct = <BlsDkgScheme as ThresholdRelease>::encrypt(&pp, &tag, &pt, &mut rng)
-        .expect("encrypt");
+    let ct =
+        <BlsDkgScheme as ThresholdRelease>::encrypt(&pp, &tag, &pt, &mut rng).expect("encrypt");
 
-    let sig1 = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk1, &tag)
-        .expect("sig1");
-    let sig2 = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk2, &tag)
-        .expect("sig2");
+    let sig1 = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk1, &tag).expect("sig1");
+    let sig2 = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk2, &tag).expect("sig2");
 
     <BlsDkgScheme as ThresholdRelease>::verify_partial(&pp, &tag, sk1.id, &sig1)
         .expect("verify sig1");
     <BlsDkgScheme as ThresholdRelease>::verify_partial(&pp, &tag, sk2.id, &sig2)
         .expect("verify sig2");
 
-    let full = <BlsDkgScheme as ThresholdRelease>::combine(&pp, &tag, &[(sk1.id, sig1), (sk2.id, sig2)])
-        .expect("combine");
+    let full =
+        <BlsDkgScheme as ThresholdRelease>::combine(&pp, &tag, &[(sk1.id, sig1), (sk2.id, sig2)])
+            .expect("combine");
 
-    let out = <BlsDkgScheme as ThresholdRelease>::decrypt(&pp, &tag, &ct, &full)
-        .expect("decrypt");
+    let out = <BlsDkgScheme as ThresholdRelease>::decrypt(&pp, &tag, &ct, &full).expect("decrypt");
 
     assert_eq!(out.0, pt.0);
 }

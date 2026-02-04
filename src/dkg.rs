@@ -8,7 +8,7 @@ use crate::bls::{g2_from_bytes, g2_to_bytes, scalar_from_id, scalar_random};
 use crate::encoding::{dec_bytes, enc_bytes, enc_len};
 use crate::lagrange::combine_g2_at_zero;
 use crate::scheme::SetupProtocol;
-use crate::types::{Error, Params, PartyId, PartyInfo, Wire};
+use crate::types::{Error, Params, PartyId, PartyInfo, Wire, validate_params};
 
 #[derive(Clone, Debug)]
 pub struct DkgPublicParams {
@@ -52,6 +52,7 @@ pub enum DkgMessage {
 pub struct DkgState {
     params: Params,
     me: PartyInfo,
+    valid: bool,
     a_coeffs: Vec<Scalar>,
     b_coeffs: Vec<Scalar>,
     commitments: HashMap<PartyId, Vec<G2Projective>>,
@@ -62,27 +63,36 @@ pub struct DkgState {
 
 impl DkgState {
     pub fn new(params: Params, me: PartyInfo) -> Self {
+        let valid = validate_params(params).is_ok();
         let mut rng = rand_core::OsRng;
-        let t = params.t as usize;
+        let t = if valid { params.t as usize } else { 0 };
         let mut a_coeffs = Vec::with_capacity(t);
         let mut b_coeffs = Vec::with_capacity(t);
         for _ in 0..t {
             a_coeffs.push(scalar_random(&mut rng));
             b_coeffs.push(scalar_random(&mut rng));
         }
-        Self {
+        let mut state = Self {
             params,
             me,
+            valid,
             a_coeffs,
             b_coeffs,
             commitments: HashMap::new(),
             shares: HashMap::new(),
             complaints: HashSet::new(),
             complaints_from: HashSet::new(),
+        };
+        if state.valid {
+            state.insert_self_share();
         }
+        state
     }
 
     pub fn initial_messages(&self) -> Result<Vec<(PartyId, DkgMessage)>, Error> {
+        if !self.valid {
+            return Err(Error::InvalidParams);
+        }
         let mut out = Vec::new();
         let h2 = hash_to_g2(b"MEMP-ENC-H2");
         let g2 = G2Projective::generator();
@@ -117,7 +127,30 @@ impl DkgState {
         Ok(out)
     }
 
-    pub fn handle_message(&mut self, from: PartyId, msg: DkgMessage) -> Result<Vec<(PartyId, DkgMessage)>, Error> {
+    fn insert_self_share(&mut self) {
+        let h2 = hash_to_g2(b"MEMP-ENC-H2");
+        let g2 = G2Projective::generator();
+        let mut coeffs = Vec::with_capacity(self.a_coeffs.len());
+        for (a, b) in self.a_coeffs.iter().zip(self.b_coeffs.iter()) {
+            let c = g2 * a + h2 * b;
+            coeffs.push(c);
+        }
+        self.commitments.insert(self.me.id, coeffs);
+        if let Ok(x) = scalar_from_id(self.me.id) {
+            let f_i = eval_poly(&self.a_coeffs, &x);
+            let r_i = eval_poly(&self.b_coeffs, &x);
+            self.shares.insert(self.me.id, (f_i, r_i));
+        }
+    }
+
+    pub fn handle_message(
+        &mut self,
+        from: PartyId,
+        msg: DkgMessage,
+    ) -> Result<Vec<(PartyId, DkgMessage)>, Error> {
+        if !self.valid {
+            return Err(Error::InvalidParams);
+        }
         match msg {
             DkgMessage::Commitment(c) => {
                 if c.from != from {
@@ -145,6 +178,9 @@ impl DkgState {
     }
 
     pub fn verify_shares(&mut self) -> Result<Vec<(PartyId, DkgMessage)>, Error> {
+        if !self.valid {
+            return Err(Error::InvalidParams);
+        }
         let mut out = Vec::new();
         let h2 = hash_to_g2(b"MEMP-ENC-H2");
         let g2 = G2Projective::generator();
@@ -155,13 +191,15 @@ impl DkgState {
                 Some(c) => c,
                 None => {
                     self.complaints.insert(dealer);
-                    out.push((
-                        dealer,
-                        DkgMessage::Complaint(DkgComplaint {
-                            from: self.me.id,
-                            against: dealer,
-                        }),
-                    ));
+                    for to in 1..=self.params.n {
+                        out.push((
+                            to,
+                            DkgMessage::Complaint(DkgComplaint {
+                                from: self.me.id,
+                                against: dealer,
+                            }),
+                        ));
+                    }
                     continue;
                 }
             };
@@ -169,13 +207,15 @@ impl DkgState {
                 Some(v) => v,
                 None => {
                     self.complaints.insert(dealer);
-                    out.push((
-                        dealer,
-                        DkgMessage::Complaint(DkgComplaint {
-                            from: self.me.id,
-                            against: dealer,
-                        }),
-                    ));
+                    for to in 1..=self.params.n {
+                        out.push((
+                            to,
+                            DkgMessage::Complaint(DkgComplaint {
+                                from: self.me.id,
+                                against: dealer,
+                            }),
+                        ));
+                    }
                     continue;
                 }
             };
@@ -189,25 +229,31 @@ impl DkgState {
             }
             if lhs != rhs {
                 self.complaints.insert(dealer);
-                out.push((
-                    dealer,
-                    DkgMessage::Complaint(DkgComplaint {
-                        from: self.me.id,
-                        against: dealer,
-                    }),
-                ));
+                for to in 1..=self.params.n {
+                    out.push((
+                        to,
+                        DkgMessage::Complaint(DkgComplaint {
+                            from: self.me.id,
+                            against: dealer,
+                        }),
+                    ));
+                }
             }
         }
         Ok(out)
     }
 
     pub fn finalize(self) -> Result<(DkgPublicParams, DkgPartySecret), Error> {
+        if !self.valid {
+            return Err(Error::InvalidParams);
+        }
         let mut qual = Vec::new();
         for dealer in 1..=self.params.n {
-            if !self.complaints.contains(&dealer) {
-                if self.commitments.contains_key(&dealer) && self.shares.contains_key(&dealer) {
-                    qual.push(dealer);
-                }
+            if self.complaints.contains(&dealer) || self.complaints_from.contains(&dealer) {
+                continue;
+            }
+            if self.commitments.contains_key(&dealer) && self.shares.contains_key(&dealer) {
+                qual.push(dealer);
             }
         }
         if qual.len() < self.params.t as usize {
@@ -230,7 +276,10 @@ impl DkgState {
 
         Ok((
             DkgPublicParams { pk, pk_shares },
-            DkgPartySecret { id: self.me.id, share },
+            DkgPartySecret {
+                id: self.me.id,
+                share,
+            },
         ))
     }
 }
@@ -255,7 +304,9 @@ impl SetupProtocol for BlsDkgScheme {
         state.handle_message(from, msg)
     }
 
-    fn begin_round(state: &mut Self::SetupState) -> Result<Vec<(PartyId, Self::SetupMessage)>, Error> {
+    fn begin_round(
+        state: &mut Self::SetupState,
+    ) -> Result<Vec<(PartyId, Self::SetupMessage)>, Error> {
         state.initial_messages()
     }
 
@@ -288,7 +339,7 @@ impl Wire for DkgCommitment {
     fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&self.from.to_be_bytes());
-        out.extend_from_slice(&enc_len(self.coeffs.len()));
+        out.extend_from_slice(&enc_len(self.coeffs.len()).expect("length must fit u32"));
         for c in self.coeffs.iter() {
             out.extend_from_slice(&g2_to_bytes(c));
         }
@@ -343,11 +394,15 @@ impl Wire for DkgShare {
         let from = u32::from_be_bytes(from_bytes);
         let to = u32::from_be_bytes(to_bytes);
         let f_i = Option::<Scalar>::from(Scalar::from_bytes_be(
-            &bytes[8..40].try_into().map_err(|_| Error::InvalidEncoding)?,
+            &bytes[8..40]
+                .try_into()
+                .map_err(|_| Error::InvalidEncoding)?,
         ))
         .ok_or(Error::InvalidEncoding)?;
         let r_i = Option::<Scalar>::from(Scalar::from_bytes_be(
-            &bytes[40..72].try_into().map_err(|_| Error::InvalidEncoding)?,
+            &bytes[40..72]
+                .try_into()
+                .map_err(|_| Error::InvalidEncoding)?,
         ))
         .ok_or(Error::InvalidEncoding)?;
         Ok(DkgShare { from, to, f_i, r_i })
@@ -383,19 +438,19 @@ impl Wire for DkgMessage {
             DkgMessage::Commitment(c) => {
                 let mut out = vec![0u8];
                 let body = c.encode();
-                out.extend_from_slice(&enc_bytes(&body));
+                out.extend_from_slice(&enc_bytes(&body).expect("length must fit u32"));
                 out
             }
             DkgMessage::Share(s) => {
                 let mut out = vec![1u8];
                 let body = s.encode();
-                out.extend_from_slice(&enc_bytes(&body));
+                out.extend_from_slice(&enc_bytes(&body).expect("length must fit u32"));
                 out
             }
             DkgMessage::Complaint(c) => {
                 let mut out = vec![2u8];
                 let body = c.encode();
-                out.extend_from_slice(&enc_bytes(&body));
+                out.extend_from_slice(&enc_bytes(&body).expect("length must fit u32"));
                 out
             }
         }
@@ -423,7 +478,7 @@ impl Wire for DkgPublicParams {
     fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&g2_to_bytes(&self.pk));
-        out.extend_from_slice(&enc_len(self.pk_shares.len()));
+        out.extend_from_slice(&enc_len(self.pk_shares.len()).expect("length must fit u32"));
         for (id, pk_i) in self.pk_shares.iter() {
             out.extend_from_slice(&id.to_be_bytes());
             out.extend_from_slice(&g2_to_bytes(pk_i));
@@ -476,14 +531,18 @@ impl Wire for DkgPartySecret {
         id_bytes.copy_from_slice(&bytes[0..4]);
         let id = u32::from_be_bytes(id_bytes);
         let share = Option::<Scalar>::from(Scalar::from_bytes_be(
-            &bytes[4..36].try_into().map_err(|_| Error::InvalidEncoding)?,
+            &bytes[4..36]
+                .try_into()
+                .map_err(|_| Error::InvalidEncoding)?,
         ))
         .ok_or(Error::InvalidEncoding)?;
         Ok(DkgPartySecret { id, share })
     }
 }
 
-pub fn compute_pk_from_shares(pk_shares: &[(PartyId, G2Projective)]) -> Result<G2Projective, Error> {
+pub fn compute_pk_from_shares(
+    pk_shares: &[(PartyId, G2Projective)],
+) -> Result<G2Projective, Error> {
     let ids: Vec<PartyId> = pk_shares.iter().map(|(id, _)| *id).collect();
     let vals: Vec<G2Projective> = pk_shares.iter().map(|(_, pk)| *pk).collect();
     combine_g2_at_zero(&ids, &vals)

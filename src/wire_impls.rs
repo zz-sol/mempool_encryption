@@ -8,7 +8,7 @@ use crate::types::{Error, Params, PartyInfo, Wire};
 
 impl Wire for Vec<u8> {
     fn encode(&self) -> Vec<u8> {
-        enc_bytes(self)
+        enc_bytes(self).expect("length must fit u32")
     }
 
     fn decode(bytes: &[u8]) -> Result<Self, Error> {

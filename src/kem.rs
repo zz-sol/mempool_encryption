@@ -4,7 +4,10 @@ use blstrs::{G1Projective, G2Projective};
 use group::Group;
 
 use crate::aead;
-use crate::bls::{g1_from_bytes, g1_to_bytes, g2_from_bytes, g2_to_bytes, gt_to_bytes, hash_to_g1, pairing, scalar_random};
+use crate::bls::{
+    g1_from_bytes, g1_to_bytes, g2_from_bytes, g2_to_bytes, gt_to_bytes, hash_to_g1, pairing,
+    scalar_random,
+};
 use crate::dkg::{BlsDkgScheme, DkgPartySecret, DkgPublicParams};
 use crate::encoding::{dec_bytes, enc_bytes, enc_tuple};
 use crate::kdf::{hkdf_expand, hkdf_extract};
@@ -38,7 +41,7 @@ pub struct BlsFullSig(pub G1Projective);
 
 impl Wire for BlsTag {
     fn encode(&self) -> Vec<u8> {
-        enc_bytes(&self.0)
+        enc_bytes(&self.0).expect("length must fit u32")
     }
 
     fn decode(bytes: &[u8]) -> Result<Self, Error> {
@@ -52,7 +55,7 @@ impl Wire for BlsTag {
 
 impl Wire for BlsPlaintext {
     fn encode(&self) -> Vec<u8> {
-        enc_bytes(&self.0)
+        enc_bytes(&self.0).expect("length must fit u32")
     }
 
     fn decode(bytes: &[u8]) -> Result<Self, Error> {
@@ -68,11 +71,11 @@ impl Wire for BlsCiphertext {
     fn encode(&self) -> Vec<u8> {
         let u_bytes = g2_to_bytes(&self.u);
         let mut out = Vec::new();
-        out.extend_from_slice(&enc_bytes(&self.tag));
-        out.extend_from_slice(&enc_bytes(&u_bytes));
-        out.extend_from_slice(&enc_bytes(&self.ck));
-        out.extend_from_slice(&enc_bytes(&self.nonce));
-        out.extend_from_slice(&enc_bytes(&self.cm));
+        out.extend_from_slice(&enc_bytes(&self.tag).expect("length must fit u32"));
+        out.extend_from_slice(&enc_bytes(&u_bytes).expect("length must fit u32"));
+        out.extend_from_slice(&enc_bytes(&self.ck).expect("length must fit u32"));
+        out.extend_from_slice(&enc_bytes(&self.nonce).expect("length must fit u32"));
+        out.extend_from_slice(&enc_bytes(&self.cm).expect("length must fit u32"));
         out
     }
 
@@ -93,7 +96,13 @@ impl Wire for BlsCiphertext {
         ck.copy_from_slice(&ck_raw);
         let mut nonce = [0u8; 12];
         nonce.copy_from_slice(&nonce_raw);
-        Ok(BlsCiphertext { tag, u, ck, nonce, cm })
+        Ok(BlsCiphertext {
+            tag,
+            u,
+            ck,
+            nonce,
+            cm,
+        })
     }
 }
 
@@ -138,8 +147,8 @@ impl ThresholdRelease for BlsDkgScheme {
         let u = G2Projective::generator() * r;
         let h = hash_to_g1(&tag.0, b"MEMP-ENC-SIG-V1");
         let w = pairing(&h, &pp.pk) * r;
-        let prk = hkdf_extract(SALT_KEM, &enc_bytes(&gt_to_bytes(&w)));
-        let ad = enc_tuple(&[&tag.0, &g2_to_bytes(&u), &g2_to_bytes(&pp.pk)]);
+        let prk = hkdf_extract(SALT_KEM, &enc_bytes(&gt_to_bytes(&w))?);
+        let ad = enc_tuple(&[&tag.0, &g2_to_bytes(&u), &g2_to_bytes(&pp.pk)])?;
         let mut info = Vec::with_capacity(DST_KDF.len() + ad.len());
         info.extend_from_slice(DST_KDF);
         info.extend_from_slice(&ad);
@@ -211,8 +220,8 @@ impl ThresholdRelease for BlsDkgScheme {
             return Err(Error::InvalidParams);
         }
         let w = pairing(&witness.0, &ct.u);
-        let prk = hkdf_extract(SALT_KEM, &enc_bytes(&gt_to_bytes(&w)));
-        let ad = enc_tuple(&[&ct.tag, &g2_to_bytes(&ct.u), &g2_to_bytes(&pp.pk)]);
+        let prk = hkdf_extract(SALT_KEM, &enc_bytes(&gt_to_bytes(&w))?);
+        let ad = enc_tuple(&[&ct.tag, &g2_to_bytes(&ct.u), &g2_to_bytes(&pp.pk)])?;
         let mut info = Vec::with_capacity(DST_KDF.len() + ad.len());
         info.extend_from_slice(DST_KDF);
         info.extend_from_slice(&ad);

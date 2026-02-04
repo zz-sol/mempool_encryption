@@ -38,6 +38,13 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+pub fn validate_params(params: Params) -> Result<(), Error> {
+    if params.n == 0 || params.t == 0 || params.t > params.n {
+        return Err(Error::InvalidParams);
+    }
+    Ok(())
+}
+
 impl From<hkdf::InvalidLength> for Error {
     fn from(_: hkdf::InvalidLength) -> Self {
         Error::CryptoError

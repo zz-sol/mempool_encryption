@@ -16,7 +16,9 @@ pub trait SetupProtocol {
         msg: Self::SetupMessage,
     ) -> Result<Vec<(PartyId, Self::SetupMessage)>, Error>;
 
-    fn begin_round(state: &mut Self::SetupState) -> Result<Vec<(PartyId, Self::SetupMessage)>, Error> {
+    fn begin_round(
+        state: &mut Self::SetupState,
+    ) -> Result<Vec<(PartyId, Self::SetupMessage)>, Error> {
         let _ = state;
         Ok(vec![])
     }
@@ -67,7 +69,11 @@ pub trait ThresholdRelease {
     ) -> Result<Self::Plaintext, Error>;
 }
 
-pub trait MempoolEncryptionScheme: SetupProtocol + ThresholdRelease<
-    PublicParams = <Self as SetupProtocol>::PublicParams,
-    PartySecret = <Self as SetupProtocol>::PartySecret,
-> {}
+pub trait MempoolEncryptionScheme:
+    SetupProtocol
+    + ThresholdRelease<
+        PublicParams = <Self as SetupProtocol>::PublicParams,
+        PartySecret = <Self as SetupProtocol>::PartySecret,
+    >
+{
+}

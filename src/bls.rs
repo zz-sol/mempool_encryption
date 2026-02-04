@@ -57,8 +57,8 @@ pub fn g1_from_bytes(bytes: &[u8]) -> Result<G1, Error> {
     }
     let mut raw = [0u8; 48];
     raw.copy_from_slice(bytes);
-    let affine = Option::<G1Affine>::from(G1Affine::from_compressed(&raw))
-        .ok_or(Error::InvalidEncoding)?;
+    let affine =
+        Option::<G1Affine>::from(G1Affine::from_compressed(&raw)).ok_or(Error::InvalidEncoding)?;
     Ok(affine.into())
 }
 
@@ -72,8 +72,8 @@ pub fn g2_from_bytes(bytes: &[u8]) -> Result<G2, Error> {
     }
     let mut raw = [0u8; 96];
     raw.copy_from_slice(bytes);
-    let affine = Option::<G2Affine>::from(G2Affine::from_compressed(&raw))
-        .ok_or(Error::InvalidEncoding)?;
+    let affine =
+        Option::<G2Affine>::from(G2Affine::from_compressed(&raw)).ok_or(Error::InvalidEncoding)?;
     Ok(affine.into())
 }
 
