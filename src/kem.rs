@@ -205,6 +205,11 @@ impl ThresholdRelease for BlsDkgScheme {
         _tag: &Self::ReleaseTag,
         partials: &[(PartyId, Self::PartialWitness)],
     ) -> Result<Self::FullWitness, Error> {
+        let mut ids: Vec<PartyId> = partials.iter().map(|(id, _)| *id).collect();
+        ids.sort_unstable();
+        if ids.windows(2).any(|w| w[0] == w[1]) {
+            return Err(Error::InvalidParams);
+        }
         let ids: Vec<PartyId> = partials.iter().map(|(id, _)| *id).collect();
         let sigs: Vec<G1Projective> = partials.iter().map(|(_, sig)| sig.0).collect();
         Ok(BlsFullSig(combine_g1_at_zero(&ids, &sigs)?))
