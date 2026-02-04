@@ -1,4 +1,3 @@
-use blstrs::Scalar;
 use mempool_encryption::dkg::{DkgMessage, DkgState};
 use mempool_encryption::types::{Error, Params, PartyInfo};
 
@@ -17,11 +16,11 @@ fn complaint_is_broadcast_on_bad_share() {
     for (idx, state) in states.iter().enumerate() {
         let dealer_id = (idx + 1) as u32;
         let out = state.initial_messages().expect("initial_messages");
-        for (to, mut msg) in out {
+        for (to, msg) in out {
+            // Drop dealer 2's share to party 1 to trigger complaint.
             if dealer_id == 2 && to == 1 {
-                if let DkgMessage::Share(ref mut share) = msg {
-                    share.f_i = Scalar::from(7u64);
-                    share.r_i = Scalar::from(9u64);
+                if let DkgMessage::Share(_) = msg {
+                    continue;
                 }
             }
             deliveries.push((to, dealer_id, msg));
@@ -57,6 +56,16 @@ fn complaints_from_disqualify_dealers() {
         let dealer_id = (idx + 1) as u32;
         let out = state.initial_messages().expect("initial_messages");
         for (to, msg) in out {
+            if dealer_id == 1 && to == 2 {
+                if let DkgMessage::Share(_) = msg {
+                    continue;
+                }
+            }
+            if dealer_id == 2 && to == 1 {
+                if let DkgMessage::Share(_) = msg {
+                    continue;
+                }
+            }
             deliveries.push((to, dealer_id, msg));
         }
     }
@@ -67,25 +76,20 @@ fn complaints_from_disqualify_dealers() {
             .expect("handle_message");
     }
 
-    // Party 3 receives complaints that disqualify dealers 1 and 2.
-    let _ = states[2]
-        .handle_message(
-            1,
-            DkgMessage::Complaint(mempool_encryption::dkg::DkgComplaint {
-                from: 1,
-                against: 1,
-            }),
-        )
-        .expect("complaint 1");
-    let _ = states[2]
-        .handle_message(
-            2,
-            DkgMessage::Complaint(mempool_encryption::dkg::DkgComplaint {
-                from: 2,
-                against: 2,
-            }),
-        )
-        .expect("complaint 2");
+    let complaints1 = states[0].verify_shares().expect("verify_shares 1");
+    let complaints2 = states[1].verify_shares().expect("verify_shares 2");
+
+    for (to, msg) in complaints1.into_iter().chain(complaints2.into_iter()) {
+        if to == 3 {
+            let from = match &msg {
+                DkgMessage::Complaint(c) => c.from,
+                _ => 0,
+            };
+            let _ = states[2]
+                .handle_message(from, msg)
+                .expect("handle complaint");
+        }
+    }
 
     let res = states.remove(2).finalize();
     assert!(matches!(res, Err(Error::InvalidParams)));
