@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+//! Mempool encryption: DKG + threshold BLS signatures + KEM (BLS12-381 / blstrs).
+//! This crate provides scheme traits plus a concrete BLS implementation.
+
 pub mod aead;
 pub mod bls;
 pub mod dkg;

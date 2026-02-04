@@ -1,3 +1,5 @@
+//! DKG with Pedersen VSS, signed messages, complaints, and share openings.
+
 use std::collections::{HashMap, HashSet};
 
 use blake3::Hasher;
@@ -15,6 +17,7 @@ use crate::types::{Error, Params, PartyId, PartyInfo, Wire, validate_params};
 pub struct DkgPublicParams {
     pub pk: G2Projective,
     pub pk_shares: Vec<(PartyId, G2Projective)>,
+    // Hash over all verified DKG messages to bind a shared transcript.
     pub transcript_hash: [u8; 32],
 }
 
@@ -28,7 +31,9 @@ pub struct DkgPartySecret {
 pub struct DkgCommitment {
     pub from: PartyId,
     pub coeffs: Vec<G2Projective>,
+    // Per-party signing public key for authenticating DKG messages.
     pub sig_pk: G2Projective,
+    // Signature over the commitment payload.
     pub sig: G1Projective,
 }
 
@@ -38,6 +43,7 @@ pub struct DkgShare {
     pub to: PartyId,
     pub f_i: Scalar,
     pub r_i: Scalar,
+    // Signature over the share payload.
     pub sig: G1Projective,
 }
 
@@ -45,6 +51,7 @@ pub struct DkgShare {
 pub struct DkgComplaint {
     pub from: PartyId,
     pub against: PartyId,
+    // Signature over the complaint payload.
     pub sig: G1Projective,
 }
 
@@ -53,6 +60,7 @@ pub enum DkgMessage {
     Commitment(DkgCommitment),
     Share(DkgShare),
     Complaint(DkgComplaint),
+    // Opening a disputed share for complaint resolution.
     ShareOpen(DkgShare),
 }
 
@@ -60,16 +68,23 @@ pub struct DkgState {
     params: Params,
     me: PartyInfo,
     valid: bool,
+    // Secret polynomials for Pedersen VSS: f(z), r(z).
     a_coeffs: Vec<Scalar>,
     b_coeffs: Vec<Scalar>,
+    // Per-party signing key used to authenticate DKG messages.
     sig_sk: Scalar,
     sig_pk: G2Projective,
     sig_pks: HashMap<PartyId, G2Projective>,
+    // Dealer commitments and received shares.
     commitments: HashMap<PartyId, Vec<G2Projective>>,
     shares: HashMap<PartyId, (Scalar, Scalar)>,
+    // Local complaints against dealers.
     complaints: HashSet<PartyId>,
+    // Complaints received from others: dealer -> set of accusers.
     complaints_from: HashMap<PartyId, HashSet<PartyId>>,
+    // Dealers whose openings failed verification.
     invalid_dealers: HashSet<PartyId>,
+    // Verified message digests for transcript hashing.
     msg_hashes: Vec<[u8; 32]>,
 }
 
@@ -113,6 +128,7 @@ impl DkgState {
             return Err(Error::InvalidParams);
         }
         let mut out = Vec::new();
+        // Pedersen commitments: C_k = g2^{a_k} h2^{b_k}.
         let h2 = hash_to_g2(b"MEMP-ENC-H2");
         let g2 = G2Projective::generator();
 
@@ -135,6 +151,7 @@ impl DkgState {
             let x = scalar_from_id(to)?;
             let f_i = eval_poly(&self.a_coeffs, &x);
             let r_i = eval_poly(&self.b_coeffs, &x);
+            // Each share is signed and sent to its recipient.
             let msg = self.sign_share(DkgShare {
                 from: self.me.id,
                 to,
@@ -175,6 +192,7 @@ impl DkgState {
         let mut out = Vec::new();
         match msg {
             DkgMessage::Commitment(c) => {
+                // Verify signature and store dealer commitment.
                 if c.from != from {
                     return Err(Error::InvalidMessage);
                 }
@@ -188,6 +206,7 @@ impl DkgState {
                 self.commitments.insert(from, c.coeffs);
             }
             DkgMessage::Share(s) => {
+                // Verify signature and store share for this party.
                 if s.from != from || s.to != self.me.id {
                     return Err(Error::InvalidMessage);
                 }
@@ -197,6 +216,7 @@ impl DkgState {
                 self.shares.insert(from, (s.f_i, s.r_i));
             }
             DkgMessage::Complaint(c) => {
+                // Verify complaint signature and track accuser.
                 if c.from != from {
                     return Err(Error::InvalidMessage);
                 }
@@ -208,6 +228,7 @@ impl DkgState {
                     .or_insert_with(HashSet::new)
                     .insert(c.from);
                 if c.against == self.me.id {
+                    // If we are accused, open the share to all parties.
                     if let Some((f_i, r_i)) = self.shares.get(&self.me.id) {
                         let open = DkgShare {
                             from: self.me.id,
@@ -224,6 +245,7 @@ impl DkgState {
                 }
             }
             DkgMessage::ShareOpen(s) => {
+                // Verify opening; disqualify dealer on invalid opening.
                 if s.from != from {
                     return Err(Error::InvalidMessage);
                 }
@@ -245,6 +267,7 @@ impl DkgState {
             return Err(Error::InvalidParams);
         }
         let mut out = Vec::new();
+        // Verify each received share against the dealer's commitments.
         let h2 = hash_to_g2(b"MEMP-ENC-H2");
         let g2 = G2Projective::generator();
         let x_i = scalar_from_id(self.me.id)?;
@@ -315,6 +338,7 @@ impl DkgState {
             {
                 continue;
             }
+            // Dealer is QUAL only if we have both commitment and share.
             if self.commitments.contains_key(&dealer) && self.shares.contains_key(&dealer) {
                 qual.push(dealer);
             }
@@ -323,6 +347,7 @@ impl DkgState {
             return Err(Error::InvalidParams);
         }
 
+        // Final share is sum of qualified shares.
         let mut share = Scalar::ZERO;
         for dealer in qual.iter() {
             let (f_i, _) = self.shares.get(dealer).ok_or(Error::InvalidShare)?;
@@ -337,6 +362,7 @@ impl DkgState {
         let pk_i = G2Projective::generator() * share;
         pk_shares.push((self.me.id, pk_i));
 
+        // Bind the protocol transcript for auditability.
         let transcript_hash = self.compute_transcript_hash();
         Ok((
             DkgPublicParams {

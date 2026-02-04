@@ -8,6 +8,7 @@ use crate::types::{Error, Params, PartyInfo, Wire};
 
 impl Wire for Vec<u8> {
     fn encode(&self) -> Vec<u8> {
+        // Length-prefixed bytes for transport.
         enc_bytes(self).expect("length must fit u32")
     }
 
@@ -22,6 +23,7 @@ impl Wire for Vec<u8> {
 
 impl Wire for Params {
     fn encode(&self) -> Vec<u8> {
+        // Fixed-width encoding: n||t.
         let mut out = Vec::with_capacity(8);
         out.extend_from_slice(&self.n.to_be_bytes());
         out.extend_from_slice(&self.t.to_be_bytes());
@@ -45,6 +47,7 @@ impl Wire for Params {
 
 impl Wire for PartyInfo {
     fn encode(&self) -> Vec<u8> {
+        // Fixed-width encoding of party id.
         self.id.to_be_bytes().to_vec()
     }
 
@@ -62,6 +65,7 @@ impl Wire for PartyInfo {
 
 impl Wire for Scalar {
     fn encode(&self) -> Vec<u8> {
+        // Big-endian scalar encoding.
         self.to_bytes_be().to_vec()
     }
 
@@ -77,6 +81,7 @@ impl Wire for Scalar {
 
 impl Wire for G1Projective {
     fn encode(&self) -> Vec<u8> {
+        // Compressed G1.
         self.to_affine().to_compressed().as_ref().to_vec()
     }
 
@@ -94,6 +99,7 @@ impl Wire for G1Projective {
 
 impl Wire for G2Projective {
     fn encode(&self) -> Vec<u8> {
+        // Compressed G2.
         self.to_affine().to_compressed().as_ref().to_vec()
     }
 
@@ -111,6 +117,7 @@ impl Wire for G2Projective {
 
 impl Wire for Gt {
     fn encode(&self) -> Vec<u8> {
+        // Compressed GT.
         let mut bytes = Vec::with_capacity(288);
         self.write_compressed(&mut bytes)
             .map_err(|_| Error::InvalidEncoding)

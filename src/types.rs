@@ -1,8 +1,11 @@
+//! Common types and error handling.
+
 use serde::{Deserialize, Serialize};
 
 pub type PartyId = u32;
 
 pub trait Wire: Sized {
+    // Canonical byte encoding for network transport.
     fn encode(&self) -> Vec<u8>;
     fn decode(bytes: &[u8]) -> Result<Self, Error>;
 }
@@ -39,6 +42,7 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 pub fn validate_params(params: Params) -> Result<(), Error> {
+    // Basic sanity: non-zero, and threshold not exceeding committee size.
     if params.n == 0 || params.t == 0 || params.t > params.n {
         return Err(Error::InvalidParams);
     }

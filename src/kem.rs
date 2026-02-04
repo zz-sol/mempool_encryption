@@ -1,3 +1,5 @@
+//! Threshold KEM built from BLS signatures and pairings.
+
 use rand_core::RngCore;
 
 use blstrs::{G1Projective, G2Projective};
@@ -20,6 +22,7 @@ const DST_KDF: &[u8] = b"MEMP-ENC-KDF-V1";
 
 #[derive(Clone, Debug)]
 pub struct BlsCiphertext {
+    // tag binds encryption context; u is KEM randomness; ck masks symmetric key.
     pub tag: Vec<u8>,
     pub u: G2Projective,
     pub ck: [u8; 32],
@@ -69,6 +72,7 @@ impl Wire for BlsPlaintext {
 
 impl Wire for BlsCiphertext {
     fn encode(&self) -> Vec<u8> {
+        // Length-prefixed encoding for network transport.
         let u_bytes = g2_to_bytes(&self.u);
         let mut out = Vec::new();
         out.extend_from_slice(&enc_bytes(&self.tag).expect("length must fit u32"));
@@ -141,6 +145,7 @@ impl ThresholdRelease for BlsDkgScheme {
         pt: &Self::Plaintext,
         rng: &mut dyn RngCore,
     ) -> Result<Self::Ciphertext, Error> {
+        // KEM: derive shared GT element, then mask a symmetric key and AEAD encrypt.
         let mut key = [0u8; 32];
         rng.fill_bytes(&mut key);
         let r = scalar_random(rng);
@@ -174,6 +179,7 @@ impl ThresholdRelease for BlsDkgScheme {
         sk_i: &Self::PartySecret,
         tag: &Self::ReleaseTag,
     ) -> Result<Self::PartialWitness, Error> {
+        // Partial BLS signature: H(tag)^{x_i}.
         let h = hash_to_g1(&tag.0, b"MEMP-ENC-SIG-V1");
         Ok(BlsPartialSig(h * sk_i.share))
     }
@@ -184,6 +190,7 @@ impl ThresholdRelease for BlsDkgScheme {
         from: PartyId,
         w: &Self::PartialWitness,
     ) -> Result<(), Error> {
+        // e(sig_i, g2) == e(H(tag), pk_i)
         let h = hash_to_g1(&tag.0, b"MEMP-ENC-SIG-V1");
         let pk_i = pp
             .pk_shares
@@ -205,6 +212,7 @@ impl ThresholdRelease for BlsDkgScheme {
         _tag: &Self::ReleaseTag,
         partials: &[(PartyId, Self::PartialWitness)],
     ) -> Result<Self::FullWitness, Error> {
+        // Lagrange interpolation at x=0 in G1.
         let mut ids: Vec<PartyId> = partials.iter().map(|(id, _)| *id).collect();
         ids.sort_unstable();
         if ids.windows(2).any(|w| w[0] == w[1]) {
@@ -221,6 +229,7 @@ impl ThresholdRelease for BlsDkgScheme {
         ct: &Self::Ciphertext,
         witness: &Self::FullWitness,
     ) -> Result<Self::Plaintext, Error> {
+        // Derive shared GT via pairing(sig, U), then unmask and AEAD-decrypt.
         if ct.tag != tag.0 {
             return Err(Error::InvalidParams);
         }

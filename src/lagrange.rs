@@ -1,3 +1,5 @@
+//! Lagrange coefficient helpers for threshold combining.
+
 use blstrs::Scalar;
 use ff::Field;
 use group::Group;
@@ -6,6 +8,7 @@ use crate::bls::scalar_from_id;
 use crate::types::{Error, PartyId};
 
 pub fn lagrange_coefficients_at_zero(ids: &[PartyId]) -> Result<Vec<Scalar>, Error> {
+    // Compute Lagrange coefficients for interpolation at x=0.
     if ids.is_empty() {
         return Err(Error::InvalidParams);
     }
@@ -32,6 +35,7 @@ pub fn combine_g1_at_zero(
     ids: &[PartyId],
     values: &[blstrs::G1Projective],
 ) -> Result<blstrs::G1Projective, Error> {
+    // Interpolate group elements at x=0 using Lagrange coefficients.
     if ids.len() != values.len() {
         return Err(Error::InvalidParams);
     }
@@ -47,6 +51,7 @@ pub fn combine_g2_at_zero(
     ids: &[PartyId],
     values: &[blstrs::G2Projective],
 ) -> Result<blstrs::G2Projective, Error> {
+    // Same as above, but for G2.
     if ids.len() != values.len() {
         return Err(Error::InvalidParams);
     }

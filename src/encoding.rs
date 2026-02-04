@@ -1,6 +1,9 @@
+//! Length-prefixed encoding helpers for wire formats.
+
 use crate::types::Error;
 
 pub fn enc_len(len: usize) -> Result<[u8; 4], Error> {
+    // Lengths are encoded as 4-byte big-endian.
     if len > u32::MAX as usize {
         return Err(Error::InvalidEncoding);
     }
@@ -8,6 +11,7 @@ pub fn enc_len(len: usize) -> Result<[u8; 4], Error> {
 }
 
 pub fn enc_bytes(bytes: &[u8]) -> Result<Vec<u8>, Error> {
+    // Length-prefix encoding: [len||bytes].
     let mut out = Vec::with_capacity(4 + bytes.len());
     out.extend_from_slice(&enc_len(bytes.len())?);
     out.extend_from_slice(bytes);
@@ -15,6 +19,7 @@ pub fn enc_bytes(bytes: &[u8]) -> Result<Vec<u8>, Error> {
 }
 
 pub fn enc_tuple(parts: &[&[u8]]) -> Result<Vec<u8>, Error> {
+    // Concatenate length-prefixed parts in order.
     let total_len: usize = parts.iter().map(|p| 4 + p.len()).sum();
     let mut out = Vec::with_capacity(total_len);
     for part in parts {
@@ -25,6 +30,7 @@ pub fn enc_tuple(parts: &[&[u8]]) -> Result<Vec<u8>, Error> {
 }
 
 pub fn dec_bytes(input: &[u8]) -> Result<(Vec<u8>, &[u8]), Error> {
+    // Decode a single length-prefixed byte string.
     if input.len() < 4 {
         return Err(Error::InvalidEncoding);
     }
