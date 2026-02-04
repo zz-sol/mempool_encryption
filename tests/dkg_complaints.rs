@@ -18,10 +18,11 @@ fn complaint_is_broadcast_on_bad_share() {
         let out = state.initial_messages().expect("initial_messages");
         for (to, msg) in out {
             // Drop dealer 2's share to party 1 to trigger complaint.
-            if dealer_id == 2 && to == 1 {
-                if let DkgMessage::Share(_) = msg {
-                    continue;
-                }
+            if dealer_id == 2
+                && to == 1
+                && let DkgMessage::Share(_) = msg
+            {
+                continue;
             }
             deliveries.push((to, dealer_id, msg));
         }
@@ -56,15 +57,17 @@ fn complaints_from_disqualify_dealers() {
         let dealer_id = (idx + 1) as u32;
         let out = state.initial_messages().expect("initial_messages");
         for (to, msg) in out {
-            if dealer_id == 1 && to == 2 {
-                if let DkgMessage::Share(_) = msg {
-                    continue;
-                }
+            if dealer_id == 1
+                && to == 2
+                && let DkgMessage::Share(_) = msg
+            {
+                continue;
             }
-            if dealer_id == 2 && to == 1 {
-                if let DkgMessage::Share(_) = msg {
-                    continue;
-                }
+            if dealer_id == 2
+                && to == 1
+                && let DkgMessage::Share(_) = msg
+            {
+                continue;
             }
             deliveries.push((to, dealer_id, msg));
         }

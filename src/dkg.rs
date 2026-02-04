@@ -57,11 +57,11 @@ pub struct DkgComplaint {
 
 #[derive(Clone, Debug)]
 pub enum DkgMessage {
-    Commitment(DkgCommitment),
-    Share(DkgShare),
-    Complaint(DkgComplaint),
+    Commitment(Box<DkgCommitment>),
+    Share(Box<DkgShare>),
+    Complaint(Box<DkgComplaint>),
     // Opening a disputed share for complaint resolution.
-    ShareOpen(DkgShare),
+    ShareOpen(Box<DkgShare>),
 }
 
 pub struct DkgState {
@@ -225,7 +225,7 @@ impl DkgState {
                 }
                 self.complaints_from
                     .entry(c.against)
-                    .or_insert_with(HashSet::new)
+                    .or_default()
                     .insert(c.from);
                 if c.against == self.me.id {
                     // If we are accused, open the share to all parties.
@@ -599,10 +599,14 @@ impl Wire for DkgMessage {
             return Err(Error::InvalidEncoding);
         }
         match tag {
-            0 => Ok(DkgMessage::Commitment(DkgCommitment::decode(&body)?)),
-            1 => Ok(DkgMessage::Share(DkgShare::decode(&body)?)),
-            2 => Ok(DkgMessage::Complaint(DkgComplaint::decode(&body)?)),
-            3 => Ok(DkgMessage::ShareOpen(DkgShare::decode(&body)?)),
+            0 => Ok(DkgMessage::Commitment(Box::new(DkgCommitment::decode(
+                &body,
+            )?))),
+            1 => Ok(DkgMessage::Share(Box::new(DkgShare::decode(&body)?))),
+            2 => Ok(DkgMessage::Complaint(Box::new(DkgComplaint::decode(
+                &body,
+            )?))),
+            3 => Ok(DkgMessage::ShareOpen(Box::new(DkgShare::decode(&body)?))),
             _ => Err(Error::InvalidEncoding),
         }
     }
@@ -718,28 +722,28 @@ impl DkgState {
         let payload = commitment_payload(&c);
         let digest = self.msg_hash(0, c.from, 0, &payload);
         c.sig = self.sign_digest(&digest);
-        Ok(DkgMessage::Commitment(c))
+        Ok(DkgMessage::Commitment(Box::new(c)))
     }
 
     fn sign_share(&self, mut s: DkgShare) -> Result<DkgMessage, Error> {
         let payload = share_payload(&s);
         let digest = self.msg_hash(1, s.from, s.to, &payload);
         s.sig = self.sign_digest(&digest);
-        Ok(DkgMessage::Share(s))
+        Ok(DkgMessage::Share(Box::new(s)))
     }
 
     fn sign_share_open(&self, mut s: DkgShare) -> Result<DkgMessage, Error> {
         let payload = share_payload(&s);
         let digest = self.msg_hash(3, s.from, s.to, &payload);
         s.sig = self.sign_digest(&digest);
-        Ok(DkgMessage::ShareOpen(s))
+        Ok(DkgMessage::ShareOpen(Box::new(s)))
     }
 
     fn sign_complaint(&self, mut c: DkgComplaint) -> Result<DkgMessage, Error> {
         let payload = complaint_payload(&c);
         let digest = self.msg_hash(2, c.from, c.against, &payload);
         c.sig = self.sign_digest(&digest);
-        Ok(DkgMessage::Complaint(c))
+        Ok(DkgMessage::Complaint(Box::new(c)))
     }
 
     fn verify_commitment(&mut self, c: &DkgCommitment) -> Result<bool, Error> {

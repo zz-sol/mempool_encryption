@@ -106,12 +106,9 @@ fn decrypt_fails_with_wrong_witness() {
     let mut enc = full.encode();
     enc[0] ^= 0x01;
     let bad = <BlsDkgScheme as ThresholdRelease>::FullWitness::decode(&enc);
-    match bad {
-        Ok(bad_w) => {
-            let res = <BlsDkgScheme as ThresholdRelease>::decrypt(&pp, &tag, &ct, &bad_w);
-            assert!(matches!(res, Err(Error::DecryptionFailed)));
-        }
-        Err(_) => {}
+    if let Ok(bad_w) = bad {
+        let res = <BlsDkgScheme as ThresholdRelease>::decrypt(&pp, &tag, &ct, &bad_w);
+        assert!(matches!(res, Err(Error::DecryptionFailed)));
     }
 }
 
@@ -128,7 +125,7 @@ fn verify_partial_fails_with_wrong_public_share() {
         .iter_mut()
         .find(|(id, _)| *id == sks[0].id)
         .unwrap();
-    pk1.1 = pk1.1 + blstrs::G2Projective::generator();
+    pk1.1 += blstrs::G2Projective::generator();
     let res = <BlsDkgScheme as ThresholdRelease>::verify_partial(&pp, &tag, sks[0].id, &sig1);
     assert!(matches!(res, Err(Error::InvalidSignature)));
 }
