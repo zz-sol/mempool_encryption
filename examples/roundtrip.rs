@@ -37,8 +37,12 @@ use mempool_encryption::types::{Params, PartyInfo};
 use rand_core::SeedableRng;
 
 fn main() {
+    // Enable tracing with `RUST_LOG`, e.g. `RUST_LOG=info`.
+    mempool_encryption::logging::init_tracing(None);
+    tracing::info!("starting roundtrip demo");
     // Parameters: n parties, threshold t.
     let params = Params { n: 3, t: 2 };
+    tracing::info!("params: n={}, t={}", params.n, params.t);
     let parties: Vec<PartyInfo> = (1..=params.n).map(|id| PartyInfo { id }).collect();
 
     // Initialize local DKG state for each party.
@@ -46,6 +50,7 @@ fn main() {
         .iter()
         .map(|me| BlsDkgScheme::init(params, *me))
         .collect();
+    tracing::info!("initialized {} parties", states.len());
 
     // Simulated message delivery queues.
     let mut inboxes: Vec<Vec<(u32, mempool_encryption::dkg::DkgMessage)>> =
@@ -55,6 +60,7 @@ fn main() {
     for (idx, state) in states.iter().enumerate() {
         let me = parties[idx];
         let out = state.initial_messages().expect("initial_messages");
+        tracing::info!("party {} produced {} messages", me.id, out.len());
         for (to, msg) in out {
             let slot = (to - 1) as usize;
             inboxes[slot].push((me.id, msg));
@@ -63,6 +69,7 @@ fn main() {
 
     for i in 0..states.len() {
         let inbox = std::mem::take(&mut inboxes[i]);
+        tracing::info!("party {} received {} messages", i + 1, inbox.len());
         for (from, msg) in inbox {
             let _ =
                 BlsDkgScheme::handle_message(&mut states[i], from, msg).expect("handle_message");
@@ -76,6 +83,7 @@ fn main() {
             panic!("unexpected complaints");
         }
     }
+    tracing::info!("share verification complete");
 
     // Finalize DKG: output public params and secret share for each party.
     let mut outputs = Vec::new();
@@ -83,6 +91,7 @@ fn main() {
         let out = BlsDkgScheme::finalize(state).expect("finalize");
         outputs.push(out);
     }
+    tracing::info!("DKG finalized");
 
     // Aggregate PK shares from all parties and reconstruct group PK.
     let (mut pp, sk1) = outputs[0].clone();
@@ -95,6 +104,7 @@ fn main() {
         }
     }
     pp.pk = compute_pk_from_shares(&pp.pk_shares).expect("compute pk");
+    tracing::info!("reconstructed group PK");
 
     // Tag binds the ciphertext to a release condition (event, time, etc.).
     let tag = BlsTag(b"demo-tag".to_vec());
@@ -104,18 +114,22 @@ fn main() {
     // Encrypt under (PK, tag).
     let ct =
         <BlsDkgScheme as ThresholdRelease>::encrypt(&pp, &tag, &pt, &mut rng).expect("encrypt");
+    tracing::info!("ciphertext created");
 
     // Parties produce partial signatures for the tag.
     let sig1 = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk1, &tag).expect("sig1");
     let sig2 = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk2, &tag).expect("sig2");
+    tracing::info!("partial signatures produced");
 
     // Combine t partials to obtain the full signature.
     let full =
         <BlsDkgScheme as ThresholdRelease>::combine(&pp, &tag, &[(sk1.id, sig1), (sk2.id, sig2)])
             .expect("combine");
+    tracing::info!("full signature combined");
 
     // Anyone can decrypt once the full signature is published.
     let out = <BlsDkgScheme as ThresholdRelease>::decrypt(&pp, &tag, &ct, &full).expect("decrypt");
+    tracing::info!("decrypted successfully");
 
     assert_eq!(out.0, pt.0);
     println!("ok: {}", String::from_utf8_lossy(&out.0));

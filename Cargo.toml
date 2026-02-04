@@ -21,6 +21,7 @@ rand_core = "0.6"
 rayon = { version = "1.10", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 zeroize = "1.7"
 
 # Additional deps needed for spec (HKDF + AEAD)

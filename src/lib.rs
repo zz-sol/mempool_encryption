@@ -10,6 +10,7 @@ pub mod encoding;
 pub mod kdf;
 pub mod kem;
 pub mod lagrange;
+pub mod logging;
 pub mod scheme;
 pub mod types;
 mod wire_impls;
