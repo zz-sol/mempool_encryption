@@ -12,6 +12,7 @@ pub mod kem;
 pub mod lagrange;
 pub mod logging;
 pub mod scheme;
+pub mod transport;
 pub mod types;
 mod wire_impls;
 

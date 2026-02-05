@@ -19,3 +19,5 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Cargo test
         run: cargo test --all-features
+      - name: E2E Script
+        run: scripts/e2e.sh

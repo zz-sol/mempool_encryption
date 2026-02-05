@@ -33,6 +33,7 @@
 use mempool_encryption::dkg::{BlsDkgScheme, DkgState, compute_pk_from_shares};
 use mempool_encryption::kem::{BlsPlaintext, BlsTag};
 use mempool_encryption::scheme::{SetupProtocol, ThresholdRelease};
+use mempool_encryption::transport::{InMemoryTransport, Transport};
 use mempool_encryption::types::{Params, PartyInfo};
 use rand_core::SeedableRng;
 
@@ -52,9 +53,8 @@ fn main() {
         .collect();
     tracing::info!("initialized {} parties", states.len());
 
-    // Simulated message delivery queues.
-    let mut inboxes: Vec<Vec<(u32, mempool_encryption::dkg::DkgMessage)>> =
-        vec![Vec::new(); params.n as usize];
+    // In-memory transport with broadcast/unicast semantics.
+    let mut transport = InMemoryTransport::new(params.n);
 
     // Round 1: broadcast commitments + private shares.
     for (idx, state) in states.iter().enumerate() {
@@ -62,14 +62,14 @@ fn main() {
         let out = state.initial_messages().expect("initial_messages");
         tracing::info!("party {} produced {} messages", me.id, out.len());
         for (to, msg) in out {
-            let slot = (to - 1) as usize;
-            inboxes[slot].push((me.id, msg));
+            transport.unicast(me.id, to, msg).expect("unicast");
         }
     }
 
     for i in 0..states.len() {
-        let inbox = std::mem::take(&mut inboxes[i]);
-        tracing::info!("party {} received {} messages", i + 1, inbox.len());
+        let me = parties[i].id;
+        let inbox = transport.drain_inbox(me);
+        tracing::info!("party {} received {} messages", me, inbox.len());
         for (from, msg) in inbox {
             let _ =
                 BlsDkgScheme::handle_message(&mut states[i], from, msg).expect("handle_message");
