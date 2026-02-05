@@ -539,7 +539,8 @@ fn append_server_log(root: &Path, line: &str) -> Result<(), Error> {
         .append(true)
         .open(path)
         .map_err(|_| Error::InvalidEncoding)?;
-    f.write_all(line.as_bytes()).map_err(|_| Error::InvalidEncoding)?;
+    f.write_all(line.as_bytes())
+        .map_err(|_| Error::InvalidEncoding)?;
     f.write_all(b"\n").map_err(|_| Error::InvalidEncoding)?;
     Ok(())
 }
