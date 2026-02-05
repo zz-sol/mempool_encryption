@@ -229,20 +229,15 @@ fn cmd_combine(args: &[String]) {
     let tag = BlsTag(decode_b64(&tag_b64).expect("tag"));
 
     let mut partials = Vec::new();
-    for entry in fs::read_dir(partials_dir).expect("partials") {
-        if let Ok(entry) = entry {
-            let mut buf = String::new();
-            if let Ok(mut f) = File::open(entry.path()) {
-                let _ = f.read_to_string(&mut buf);
-                if let Ok(bytes) = STANDARD.decode(buf.as_bytes()) {
-                    if let Ok(sig) = BlsPartialSig::decode(&bytes) {
-                        if let Some(id) =
-                            parse_id_from_filename(entry.file_name().to_string_lossy().as_ref())
-                        {
-                            partials.push((id, sig));
-                        }
-                    }
-                }
+    for entry in fs::read_dir(partials_dir).expect("partials").flatten() {
+        let mut buf = String::new();
+        if let Ok(mut f) = File::open(entry.path()) {
+            let _ = f.read_to_string(&mut buf);
+            if let Ok(bytes) = STANDARD.decode(buf.as_bytes())
+                && let Ok(sig) = BlsPartialSig::decode(&bytes)
+                && let Some(id) = parse_id_from_filename(entry.file_name().to_string_lossy().as_ref())
+            {
+                partials.push((id, sig));
             }
         }
     }
@@ -472,12 +467,11 @@ fn drain_inbox(root: &Path, me: u32) -> Result<Vec<(u32, DkgMessage)>, Error> {
         let mut buf = String::new();
         if let Ok(mut f) = File::open(entry.path()) {
             let _ = f.read_to_string(&mut buf);
-            if let Ok(wire) = serde_json::from_str::<WireMessage>(&buf) {
-                if let Ok(bytes) = STANDARD.decode(wire.bytes_b64.as_bytes()) {
-                    if let Ok(msg) = DkgMessage::decode(&bytes) {
-                        out.push((wire.from, msg));
-                    }
-                }
+            if let Ok(wire) = serde_json::from_str::<WireMessage>(&buf)
+                && let Ok(bytes) = STANDARD.decode(wire.bytes_b64.as_bytes())
+                && let Ok(msg) = DkgMessage::decode(&bytes)
+            {
+                out.push((wire.from, msg));
             }
         }
         let _ = fs::remove_file(entry.path());
