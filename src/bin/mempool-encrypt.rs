@@ -235,7 +235,8 @@ fn cmd_combine(args: &[String]) {
             let _ = f.read_to_string(&mut buf);
             if let Ok(bytes) = STANDARD.decode(buf.as_bytes())
                 && let Ok(sig) = BlsPartialSig::decode(&bytes)
-                && let Some(id) = parse_id_from_filename(entry.file_name().to_string_lossy().as_ref())
+                && let Some(id) =
+                    parse_id_from_filename(entry.file_name().to_string_lossy().as_ref())
             {
                 partials.push((id, sig));
             }
