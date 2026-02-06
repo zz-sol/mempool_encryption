@@ -13,7 +13,7 @@ fn complaint_is_broadcast_on_bad_share() {
     let mut states = init_states(params);
 
     let mut deliveries = Vec::new();
-    for (idx, state) in states.iter().enumerate() {
+    for (idx, state) in states.iter_mut().enumerate() {
         let dealer_id = (idx + 1) as u32;
         let out = state.initial_messages().expect("initial_messages");
         for (to, msg) in out {
@@ -53,7 +53,7 @@ fn complaints_from_disqualify_dealers() {
     let mut states = init_states(params);
 
     let mut deliveries = Vec::new();
-    for (idx, state) in states.iter().enumerate() {
+    for (idx, state) in states.iter_mut().enumerate() {
         let dealer_id = (idx + 1) as u32;
         let out = state.initial_messages().expect("initial_messages");
         for (to, msg) in out {

@@ -12,7 +12,7 @@ fn enc_len_rejects_oversize() {
 fn invalid_params_rejected() {
     let params = Params { n: 0, t: 0 };
     let me = PartyInfo { id: 1 };
-    let state = DkgState::new(params, me);
+    let mut state = DkgState::new(params, me);
     let res = state.initial_messages();
     assert!(res.is_err());
 }

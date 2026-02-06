@@ -17,7 +17,7 @@ fn dkg_encrypt_decrypt_roundtrip() {
     let mut inboxes: Vec<Vec<(u32, mempool_encryption::dkg::DkgMessage)>> =
         vec![Vec::new(); params.n as usize];
 
-    for (idx, state) in states.iter().enumerate() {
+    for (idx, state) in states.iter_mut().enumerate() {
         let me = parties[idx];
         let out = state.initial_messages().expect("initial_messages");
         for (to, msg) in out {
@@ -54,7 +54,7 @@ fn dkg_encrypt_decrypt_roundtrip() {
             }
         }
     }
-    pp.pk = compute_pk_from_shares(&pp.pk_shares).expect("compute pk");
+    pp.pk = Some(compute_pk_from_shares(&pp.pk_shares).expect("compute pk"));
 
     let tag = BlsTag(b"test-tag".to_vec());
     let pt = BlsPlaintext(b"hello".to_vec());

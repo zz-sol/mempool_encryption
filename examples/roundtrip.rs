@@ -57,7 +57,7 @@ fn main() {
     let mut transport = InMemoryTransport::new(params.n);
 
     // Round 1: broadcast commitments + private shares.
-    for (idx, state) in states.iter().enumerate() {
+    for (idx, state) in states.iter_mut().enumerate() {
         let me = parties[idx];
         let out = state.initial_messages().expect("initial_messages");
         tracing::info!("party {} produced {} messages", me.id, out.len());
@@ -103,7 +103,7 @@ fn main() {
             }
         }
     }
-    pp.pk = compute_pk_from_shares(&pp.pk_shares).expect("compute pk");
+    pp.pk = Some(compute_pk_from_shares(&pp.pk_shares).expect("compute pk"));
     tracing::info!("reconstructed group PK");
 
     // Tag binds the ciphertext to a release condition (event, time, etc.).

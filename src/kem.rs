@@ -145,15 +145,16 @@ impl ThresholdRelease for BlsDkgScheme {
         pt: &Self::Plaintext,
         rng: &mut dyn RngCore,
     ) -> Result<Self::Ciphertext, Error> {
+        let pk = pp.pk.as_ref().ok_or(Error::InvalidParams)?;
         // KEM: derive shared GT element, then mask a symmetric key and AEAD encrypt.
         let mut key = [0u8; 32];
         rng.fill_bytes(&mut key);
         let r = scalar_random(rng);
         let u = G2Projective::generator() * r;
         let h = hash_to_g1(&tag.0, b"MEMP-ENC-SIG-V1");
-        let w = pairing(&h, &pp.pk) * r;
+        let w = pairing(&h, pk) * r;
         let prk = hkdf_extract(SALT_KEM, &enc_bytes(&gt_to_bytes(&w))?);
-        let ad = enc_tuple(&[&tag.0, &g2_to_bytes(&u), &g2_to_bytes(&pp.pk)])?;
+        let ad = enc_tuple(&[&tag.0, &g2_to_bytes(&u), &g2_to_bytes(pk)])?;
         let mut info = Vec::with_capacity(DST_KDF.len() + ad.len());
         info.extend_from_slice(DST_KDF);
         info.extend_from_slice(&ad);
@@ -229,13 +230,14 @@ impl ThresholdRelease for BlsDkgScheme {
         ct: &Self::Ciphertext,
         witness: &Self::FullWitness,
     ) -> Result<Self::Plaintext, Error> {
+        let pk = pp.pk.as_ref().ok_or(Error::InvalidParams)?;
         // Derive shared GT via pairing(sig, U), then unmask and AEAD-decrypt.
         if ct.tag != tag.0 {
             return Err(Error::InvalidParams);
         }
         let w = pairing(&witness.0, &ct.u);
         let prk = hkdf_extract(SALT_KEM, &enc_bytes(&gt_to_bytes(&w))?);
-        let ad = enc_tuple(&[&ct.tag, &g2_to_bytes(&ct.u), &g2_to_bytes(&pp.pk)])?;
+        let ad = enc_tuple(&[&ct.tag, &g2_to_bytes(&ct.u), &g2_to_bytes(pk)])?;
         let mut info = Vec::with_capacity(DST_KDF.len() + ad.len());
         info.extend_from_slice(DST_KDF);
         info.extend_from_slice(&ad);

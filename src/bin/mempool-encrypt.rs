@@ -84,7 +84,7 @@ fn cmd_dkg_init(args: &[String]) {
 
     let params = Params { n, t };
     let me = PartyInfo { id };
-    let state = BlsDkgScheme::init(params, me);
+    let mut state = BlsDkgScheme::init(params, me);
     save_state(&root, id, &state).expect("save state");
 
     let out = state.initial_messages().expect("initial_messages");
@@ -271,12 +271,12 @@ fn cmd_public_merge(args: &[String]) {
     }
     let pk = compute_pk_from_shares(&pk_shares).expect("compute pk");
     let merged = DkgPublicParams {
-        pk,
+        pk: Some(pk),
         pk_shares,
         transcript_hash,
     };
     let json = serde_json::to_string_pretty(&PublicParamsJson {
-        pk_b64: STANDARD.encode(merged.pk.encode()),
+        pk_b64: STANDARD.encode(merged.pk.as_ref().expect("pk").encode()),
         pk_shares: merged
             .pk_shares
             .iter()
@@ -342,7 +342,8 @@ fn load_state(root: &Path, id: u32) -> Result<DkgState, Error> {
 
 fn save_public(root: &Path, id: u32, pp: &DkgPublicParams) -> Result<(), Error> {
     let dir = party_dir(root, id);
-    let pk_b64 = STANDARD.encode(pp.pk.encode());
+    let pk = pp.pk.as_ref().ok_or(Error::InvalidParams)?;
+    let pk_b64 = STANDARD.encode(pk.encode());
     let pk_shares = pp
         .pk_shares
         .iter()
@@ -401,7 +402,7 @@ fn load_public(path: &Path) -> Result<DkgPublicParams, Error> {
     let mut th = [0u8; 32];
     th.copy_from_slice(&th_bytes);
     Ok(DkgPublicParams {
-        pk,
+        pk: Some(pk),
         pk_shares,
         transcript_hash: th,
     })
