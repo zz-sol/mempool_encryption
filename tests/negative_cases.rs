@@ -69,12 +69,13 @@ fn decrypt_fails_with_wrong_tag() {
     let ct =
         <BlsDkgScheme as ThresholdRelease>::encrypt(&pp, &tag, &pt, &mut rng).expect("encrypt");
     let sig1 =
-        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[0], &tag).expect("sig1");
+        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[0], &tag, &ct).expect("sig1");
     let sig2 =
-        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[1], &tag).expect("sig2");
+        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[1], &tag, &ct).expect("sig2");
     let full = <BlsDkgScheme as ThresholdRelease>::combine(
         &pp,
         &tag,
+        &ct,
         &[(sks[0].id, sig1), (sks[1].id, sig2)],
     )
     .expect("combine");
@@ -92,12 +93,13 @@ fn decrypt_fails_with_wrong_witness() {
     let ct =
         <BlsDkgScheme as ThresholdRelease>::encrypt(&pp, &tag, &pt, &mut rng).expect("encrypt");
     let sig1 =
-        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[0], &tag).expect("sig1");
+        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[0], &tag, &ct).expect("sig1");
     let sig2 =
-        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[1], &tag).expect("sig2");
+        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[1], &tag, &ct).expect("sig2");
     let full = <BlsDkgScheme as ThresholdRelease>::combine(
         &pp,
         &tag,
+        &ct,
         &[(sks[0].id, sig1), (sks[1].id, sig2)],
     )
     .expect("combine");
@@ -117,8 +119,12 @@ fn verify_partial_fails_with_wrong_public_share() {
     let params = Params { n: 3, t: 2 };
     let (mut pp, sks) = setup_pp_and_sks(params);
     let tag = BlsTag(b"tag-1".to_vec());
+    let pt = BlsPlaintext(b"hello".to_vec());
+    let mut rng = rand_chacha::ChaCha20Rng::from_entropy();
+    let ct =
+        <BlsDkgScheme as ThresholdRelease>::encrypt(&pp, &tag, &pt, &mut rng).expect("encrypt");
     let sig1 =
-        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[0], &tag).expect("sig1");
+        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[0], &tag, &ct).expect("sig1");
     // Corrupt pk_share for party 1
     let pk1 = pp
         .pk_shares
@@ -126,7 +132,7 @@ fn verify_partial_fails_with_wrong_public_share() {
         .find(|(id, _)| *id == sks[0].id)
         .unwrap();
     pk1.1 += blstrs::G2Projective::generator();
-    let res = <BlsDkgScheme as ThresholdRelease>::verify_partial(&pp, &tag, sks[0].id, &sig1);
+    let res = <BlsDkgScheme as ThresholdRelease>::verify_partial(&pp, &tag, &ct, sks[0].id, &sig1);
     assert!(matches!(res, Err(Error::InvalidSignature)));
 }
 
@@ -142,11 +148,16 @@ fn combine_with_duplicate_party_ids_fails() {
     let params = Params { n: 3, t: 2 };
     let (pp, sks) = setup_pp_and_sks(params);
     let tag = BlsTag(b"tag-1".to_vec());
+    let pt = BlsPlaintext(b"hello".to_vec());
+    let mut rng = rand_chacha::ChaCha20Rng::from_entropy();
+    let ct =
+        <BlsDkgScheme as ThresholdRelease>::encrypt(&pp, &tag, &pt, &mut rng).expect("encrypt");
     let sig1 =
-        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[0], &tag).expect("sig1");
+        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sks[0], &tag, &ct).expect("sig1");
     let res = <BlsDkgScheme as ThresholdRelease>::combine(
         &pp,
         &tag,
+        &ct,
         &[(sks[0].id, sig1.clone()), (sks[0].id, sig1)],
     );
     assert!(res.is_err());

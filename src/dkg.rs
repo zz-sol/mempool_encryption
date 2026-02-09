@@ -640,10 +640,13 @@ impl SetupProtocol for BlsDkgScheme {
     type PartySecret = DkgPartySecret;
     type SetupMessage = DkgMessage;
     type SetupState = DkgState;
+    type SetupConfig = ();
 
-    fn init(params: Params, me: PartyInfo) -> Self::SetupState {
+    fn init_with(params: Params, me: PartyInfo, _config: Self::SetupConfig) -> Self::SetupState {
         DkgState::new(params, me)
     }
+
+    fn default_config() -> Self::SetupConfig {}
 
     fn handle_message(
         state: &mut Self::SetupState,

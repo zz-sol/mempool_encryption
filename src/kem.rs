@@ -179,6 +179,7 @@ impl ThresholdRelease for BlsDkgScheme {
         _pp: &Self::PublicParams,
         sk_i: &Self::PartySecret,
         tag: &Self::ReleaseTag,
+        _ct: &Self::Ciphertext,
     ) -> Result<Self::PartialWitness, Error> {
         // Partial BLS signature: H(tag)^{x_i}.
         let h = hash_to_g1(&tag.0, b"MEMP-ENC-SIG-V1");
@@ -188,6 +189,7 @@ impl ThresholdRelease for BlsDkgScheme {
     fn verify_partial(
         pp: &Self::PublicParams,
         tag: &Self::ReleaseTag,
+        _ct: &Self::Ciphertext,
         from: PartyId,
         w: &Self::PartialWitness,
     ) -> Result<(), Error> {
@@ -211,6 +213,7 @@ impl ThresholdRelease for BlsDkgScheme {
     fn combine(
         _pp: &Self::PublicParams,
         _tag: &Self::ReleaseTag,
+        _ct: &Self::Ciphertext,
         partials: &[(PartyId, Self::PartialWitness)],
     ) -> Result<Self::FullWitness, Error> {
         // Lagrange interpolation at x=0 in G1.

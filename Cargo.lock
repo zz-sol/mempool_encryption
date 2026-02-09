@@ -381,6 +381,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tess",
  "tracing",
  "tracing-subscriber",
  "zeroize",
@@ -649,6 +650,24 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "tess"
+version = "0.1.0"
+source = "git+https://github.com/zz-sol/Tess#96cc761640236cf02487e4e8019cb2e4d0f63b38"
+dependencies = [
+ "blake3",
+ "blstrs",
+ "ff",
+ "group",
+ "pairing",
+ "rand",
+ "rand_chacha",
+ "rand_core",
+ "serde",
+ "tracing",
+ "zeroize",
+]
 
 [[package]]
 name = "thread_local"
