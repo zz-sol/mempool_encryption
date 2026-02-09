@@ -34,3 +34,8 @@ chacha20poly1305 = { version = "0.10", features = ["std"] }
 
 [dev-dependencies]
 rand = "0.8"
+criterion = "0.5"
+
+[[bench]]
+name = "bls_dkg_steps"
+harness = false

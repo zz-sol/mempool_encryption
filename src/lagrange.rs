@@ -45,24 +45,21 @@ pub fn combine_g1_at_zero(
     let coeffs = lagrange_coefficients_at_zero(ids)?;
 
     #[cfg(feature = "parallel")]
-    {
-        let acc = coeffs
-            .par_iter()
-            .zip(values.par_iter())
-            .map(|(coeff, value)| *value * *coeff)
-            .reduce(blstrs::G1Projective::identity, |a, b| a + b);
-        return Ok(acc);
-    }
+    let acc = coeffs
+        .par_iter()
+        .zip(values.par_iter())
+        .map(|(coeff, value)| *value * *coeff)
+        .reduce(blstrs::G1Projective::identity, |a, b| a + b);
 
     #[cfg(not(feature = "parallel"))]
-    let mut acc = blstrs::G1Projective::identity();
+    let acc = {
+        let mut acc = blstrs::G1Projective::identity();
+        for (coeff, value) in coeffs.iter().zip(values.iter()) {
+            acc += *value * *coeff;
+        }
+        acc
+    };
 
-    #[cfg(not(feature = "parallel"))]
-    for (coeff, value) in coeffs.iter().zip(values.iter()) {
-        acc += *value * *coeff;
-    }
-
-    #[cfg(not(feature = "parallel"))]
     Ok(acc)
 }
 
@@ -77,23 +74,20 @@ pub fn combine_g2_at_zero(
     let coeffs = lagrange_coefficients_at_zero(ids)?;
 
     #[cfg(feature = "parallel")]
-    {
-        let acc = coeffs
-            .par_iter()
-            .zip(values.par_iter())
-            .map(|(coeff, value)| *value * *coeff)
-            .reduce(blstrs::G2Projective::identity, |a, b| a + b);
-        return Ok(acc);
-    }
+    let acc = coeffs
+        .par_iter()
+        .zip(values.par_iter())
+        .map(|(coeff, value)| *value * *coeff)
+        .reduce(blstrs::G2Projective::identity, |a, b| a + b);
 
     #[cfg(not(feature = "parallel"))]
-    let mut acc = blstrs::G2Projective::identity();
+    let acc = {
+        let mut acc = blstrs::G2Projective::identity();
+        for (coeff, value) in coeffs.iter().zip(values.iter()) {
+            acc += *value * *coeff;
+        }
+        acc
+    };
 
-    #[cfg(not(feature = "parallel"))]
-    for (coeff, value) in coeffs.iter().zip(values.iter()) {
-        acc += *value * *coeff;
-    }
-
-    #[cfg(not(feature = "parallel"))]
     Ok(acc)
 }
