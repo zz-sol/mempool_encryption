@@ -166,6 +166,11 @@ This ties setup to the release/decrypt API while keeping setup interactive if de
 - `FullWitness`: aggregated signature `sigma`.
 - `Ciphertext`: `(tg, U, C_K, N, C_M)`.
 
+## Security Note
+- The construction is intended as a **KEM–DEM** design: the pairing-based KEM is IND-CPA, and the
+  DEM uses AEAD. Together, this yields **CCA-style message security** (non-malleability) under the
+  standard KEM–DEM composition assumptions.
+
 ## Dummy Interactive Component for Tess
 Provide a `SilentSetup` helper:
 ```rust

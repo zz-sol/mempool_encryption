@@ -55,8 +55,8 @@ impl From<hkdf::InvalidLength> for Error {
     }
 }
 
-impl From<chacha20poly1305::aead::Error> for Error {
-    fn from(_: chacha20poly1305::aead::Error) -> Self {
+impl From<aes_gcm::aead::Error> for Error {
+    fn from(_: aes_gcm::aead::Error) -> Self {
         Error::CryptoError
     }
 }
