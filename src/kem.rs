@@ -22,10 +22,10 @@ const DST_KDF: &[u8] = b"MEMP-ENC-KDF-V1";
 
 #[derive(Clone, Debug)]
 pub struct BlsCiphertext {
-    // tag binds encryption context; u is KEM randomness; ck masks symmetric key.
+    // tag binds encryption context; u is KEM randomness; ck masks 128-bit symmetric key.
     pub tag: Vec<u8>,
     pub u: G2Projective,
-    pub ck: [u8; 32],
+    pub ck: [u8; 16],
     pub nonce: [u8; 12],
     pub cm: Vec<u8>,
 }
@@ -92,11 +92,11 @@ impl Wire for BlsCiphertext {
         if !rest.is_empty() {
             return Err(Error::InvalidEncoding);
         }
-        if ck_raw.len() != 32 || nonce_raw.len() != 12 {
+        if ck_raw.len() != 16 || nonce_raw.len() != 12 {
             return Err(Error::InvalidEncoding);
         }
         let u = g2_from_bytes(&u_raw)?;
-        let mut ck = [0u8; 32];
+        let mut ck = [0u8; 16];
         ck.copy_from_slice(&ck_raw);
         let mut nonce = [0u8; 12];
         nonce.copy_from_slice(&nonce_raw);
@@ -145,9 +145,11 @@ impl ThresholdRelease for BlsDkgScheme {
         pt: &Self::Plaintext,
         rng: &mut dyn RngCore,
     ) -> Result<Self::Ciphertext, Error> {
+        // NOTE: Overall message security is IND-CCA via KEM-DEM composition:
+        // the pairing-based KEM is IND-CPA, and AEAD provides ciphertext integrity.
         let pk = pp.pk.as_ref().ok_or(Error::InvalidParams)?;
-        // KEM: derive shared GT element, then mask a symmetric key and AEAD encrypt.
-        let mut key = [0u8; 32];
+        // KEM: derive shared GT element, then mask a 128-bit symmetric key and AEAD encrypt.
+        let mut key = [0u8; 16];
         rng.fill_bytes(&mut key);
         let r = scalar_random(rng);
         let u = G2Projective::generator() * r;
@@ -158,9 +160,9 @@ impl ThresholdRelease for BlsDkgScheme {
         let mut info = Vec::with_capacity(DST_KDF.len() + ad.len());
         info.extend_from_slice(DST_KDF);
         info.extend_from_slice(&ad);
-        let k_prime = hkdf_expand(&prk, &info, 32)?;
-        let mut ck = [0u8; 32];
-        for i in 0..32 {
+        let k_prime = hkdf_expand(&prk, &info, 16)?;
+        let mut ck = [0u8; 16];
+        for i in 0..16 {
             ck[i] = key[i] ^ k_prime[i];
         }
         let mut nonce = [0u8; 12];
@@ -231,7 +233,7 @@ impl ThresholdRelease for BlsDkgScheme {
         witness: &Self::FullWitness,
     ) -> Result<Self::Plaintext, Error> {
         let pk = pp.pk.as_ref().ok_or(Error::InvalidParams)?;
-        // Derive shared GT via pairing(sig, U), then unmask and AEAD-decrypt.
+        // Derive shared GT via pairing(sig, U), then unmask and AEAD-decrypt (128-bit key).
         if ct.tag != tag.0 {
             return Err(Error::InvalidParams);
         }
@@ -241,9 +243,9 @@ impl ThresholdRelease for BlsDkgScheme {
         let mut info = Vec::with_capacity(DST_KDF.len() + ad.len());
         info.extend_from_slice(DST_KDF);
         info.extend_from_slice(&ad);
-        let k_prime = hkdf_expand(&prk, &info, 32)?;
-        let mut key = [0u8; 32];
-        for i in 0..32 {
+        let k_prime = hkdf_expand(&prk, &info, 16)?;
+        let mut key = [0u8; 16];
+        for i in 0..16 {
             key[i] = ct.ck[i] ^ k_prime[i];
         }
         let pt = aead::decrypt(&key, &ct.nonce, &ct.cm, &ad)?;

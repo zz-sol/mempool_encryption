@@ -1,18 +1,21 @@
-//! AEAD helpers (ChaCha20-Poly1305).
+//! AEAD helpers (AES-128-GCM).
 
-use chacha20poly1305::aead::{Aead, KeyInit, Payload};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use aes_gcm::aead::generic_array::GenericArray;
+use aes_gcm::aead::{Aead, KeyInit, Payload};
+use aes_gcm::{Aes128Gcm, Nonce};
 
 use crate::types::Error;
 
 pub const NONCE_LEN: usize = 12;
+pub const KEY_LEN: usize = 16;
 
 pub fn encrypt(key: &[u8], nonce: &[u8], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, Error> {
-    // AEAD encrypt with ChaCha20-Poly1305.
-    if key.len() != 32 || nonce.len() != NONCE_LEN {
+    // AEAD encrypt with AES-128-GCM.
+    if key.len() != KEY_LEN || nonce.len() != NONCE_LEN {
         return Err(Error::InvalidParams);
     }
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    let key = GenericArray::from_slice(key);
+    let cipher = Aes128Gcm::new(key);
     let nonce = Nonce::from_slice(nonce);
     cipher
         .encrypt(
@@ -27,10 +30,11 @@ pub fn encrypt(key: &[u8], nonce: &[u8], plaintext: &[u8], aad: &[u8]) -> Result
 
 pub fn decrypt(key: &[u8], nonce: &[u8], ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, Error> {
     // AEAD decrypt; returns DecryptionFailed on authentication error.
-    if key.len() != 32 || nonce.len() != NONCE_LEN {
+    if key.len() != KEY_LEN || nonce.len() != NONCE_LEN {
         return Err(Error::InvalidParams);
     }
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    let key = GenericArray::from_slice(key);
+    let cipher = Aes128Gcm::new(key);
     let nonce = Nonce::from_slice(nonce);
     cipher
         .decrypt(

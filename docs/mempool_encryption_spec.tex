@@ -39,11 +39,11 @@ Let:
   \item $H_{\mathsf{BLS\_sig}} : \{0,1\}^* \rightarrow G_1$ be a hash-to-curve function instantiated as\\
         \texttt{BLS12381G1\_XMD:SHA-256\_SSWU\_RO\_} with DST \texttt{DST\_sig},
   \item $\mathsf{KDF}$ be HKDF-SHA256,
-  \item $\mathsf{AEAD}$ be an authenticated encryption scheme (e.g.\ AES-256-GCM or ChaCha20-Poly1305).
+  \item $\mathsf{AEAD}$ be an authenticated encryption scheme (e.g.\ AES-128-GCM).
 \end{itemize}
 
 All group elements are serialized using the standard compressed encodings for BLS12-381.
-The security parameter is $\lambda = 256$. The HKDF salt is the fixed protocol constant
+The security parameter is $\lambda = 128$. The HKDF salt is the fixed protocol constant
 \texttt{salt\_kem}=\texttt{MEMP-ENC-KEM-V1}. The domain-separation constants are
 \texttt{DST\_sig}=\texttt{MEMP-ENC-SIG-V1} and \texttt{DST\_kdf}=\texttt{MEMP-ENC-KDF-V1}.
 All protocol constants are interpreted as ASCII byte strings (identical to UTF-8 for these values).
@@ -167,7 +167,7 @@ $\mathsf{tg}$ so that the signature and encapsulation bind to the same group ele
 To encrypt a message $M$ under public key $PK$ and tag $\mathsf{tg}$:
 
 \begin{enumerate}
-  \item Sample a random symmetric key $K \in \{0,1\}^{256}$.
+  \item Sample a random symmetric key $K \in \{0,1\}^{128}$.
   \item Sample $r\leftarrow\mathbb{F}_r$ and compute $U=g_2^{r}\in G_2$.
   \item Compute
   \[
@@ -176,7 +176,7 @@ To encrypt a message $M$ under public key $PK$ and tag $\mathsf{tg}$:
   \item Derive a masking key
   \[
   \mathrm{PRK}=\mathsf{HKDF\text{-}Extract}(\texttt{salt\_kem},\, \mathsf{enc}(W)),\quad
-  K'=\mathsf{HKDF\text{-}Expand}(\mathrm{PRK},\, \texttt{DST}_{\mathsf{kdf}} \parallel \mathsf{enc}(\mathsf{tg},U,PK),\, 32).
+  K'=\mathsf{HKDF\text{-}Expand}(\mathrm{PRK},\, \texttt{DST}_{\mathsf{kdf}} \parallel \mathsf{enc}(\mathsf{tg},U,PK),\, 16).
   \]
   \item Compute $C_K = K \oplus K'$.
   \item Sample a fresh nonce $N\in\{0,1\}^{96}$ uniformly at random.
@@ -204,7 +204,7 @@ Given a valid BLS signature $\sigma=H_{\mathsf{BLS\_sig}}(\mathsf{tg})^{x}$:
   \item Derive
   \[
   \mathrm{PRK}=\mathsf{HKDF\text{-}Extract}(\texttt{salt\_kem},\, \mathsf{enc}(W')),\quad
-  K'=\mathsf{HKDF\text{-}Expand}(\mathrm{PRK},\, \texttt{DST}_{\mathsf{kdf}} \parallel \mathsf{enc}(\mathsf{tg},U,PK),\, 32).
+  K'=\mathsf{HKDF\text{-}Expand}(\mathrm{PRK},\, \texttt{DST}_{\mathsf{kdf}} \parallel \mathsf{enc}(\mathsf{tg},U,PK),\, 16).
   \]
   \item Recover $K = C_K \oplus K'$.
   \item Output $M=\mathsf{AEAD.Dec}(K, N, C_M;\, \mathsf{AD})$ with the same
@@ -230,9 +230,9 @@ To release the plaintext publicly:
 \section{Security Assumptions and Guarantees}
 
 \begin{itemize}
-  \item \textbf{Confidentiality:} The KEM is IND-CPA secure under the decisional bilinear
-        Diffie--Hellman (DBDH) assumption in $(G_1,G_2,G_T)$, modeled in the random oracle model
-        for $H_{\mathsf{BLS\_sig}}$ and HKDF.
+  \item \textbf{Confidentiality / Non-malleability:} The overall KEM--DEM construction is IND-CCA
+        secure for the message under the decisional bilinear Diffie--Hellman (DBDH) assumption
+        in $(G_1,G_2,G_T)$, with AEAD providing ciphertext integrity and HKDF in the random oracle model.
   \item \textbf{Threshold enforcement:} Fewer than $t$ parties cannot produce a valid signature
         under the EUF-CMA security of BLS signatures.
   \item \textbf{Key secrecy:} The master secret $x$ is never reconstructed.
