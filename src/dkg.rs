@@ -17,7 +17,8 @@ use crate::types::{Error, Params, PartyId, PartyInfo, Wire, validate_params};
 
 #[derive(Clone, Debug)]
 pub struct DkgPublicParams {
-    pub pk: G2Projective,
+    // Group public key. None until pk_shares are merged externally.
+    pub pk: Option<G2Projective>,
     pub pk_shares: Vec<(PartyId, G2Projective)>,
     // Hash over all verified DKG messages to bind a shared transcript.
     pub transcript_hash: [u8; 32],
@@ -80,6 +81,8 @@ pub struct DkgState {
     // Dealer commitments and received shares.
     commitments: HashMap<PartyId, Vec<G2Projective>>,
     shares: HashMap<PartyId, (Scalar, Scalar)>,
+    // Shares this party sent to each recipient (for dispute openings).
+    shares_sent: HashMap<PartyId, (Scalar, Scalar)>,
     // Shares received before we learned the sender's sig_pk.
     pending_shares: HashMap<PartyId, Vec<DkgShare>>,
     // Local complaints against dealers.
@@ -144,6 +147,7 @@ impl DkgState {
             sig_pks: HashMap::new(),
             commitments: HashMap::new(),
             shares: HashMap::new(),
+            shares_sent: HashMap::new(),
             pending_shares: HashMap::new(),
             complaints: HashSet::new(),
             complaints_from: HashMap::new(),
@@ -156,7 +160,7 @@ impl DkgState {
         state
     }
 
-    pub fn initial_messages(&self) -> Result<Vec<(PartyId, DkgMessage)>, Error> {
+    pub fn initial_messages(&mut self) -> Result<Vec<(PartyId, DkgMessage)>, Error> {
         if !self.valid {
             return Err(Error::InvalidParams);
         }
@@ -177,13 +181,20 @@ impl DkgState {
             sig: G1Projective::identity(),
         })?;
         for to in 1..=self.params.n {
+            if to == self.me.id {
+                continue;
+            }
             out.push((to, commit_msg.clone()));
         }
 
         for to in 1..=self.params.n {
+            if to == self.me.id {
+                continue;
+            }
             let x = scalar_from_id(to)?;
             let f_i = eval_poly(&self.a_coeffs, &x);
             let r_i = eval_poly(&self.b_coeffs, &x);
+            self.shares_sent.insert(to, (f_i, r_i));
             // Each share is signed and sent to its recipient.
             let msg = self.sign_share(DkgShare {
                 from: self.me.id,
@@ -211,6 +222,7 @@ impl DkgState {
             let f_i = eval_poly(&self.a_coeffs, &x);
             let r_i = eval_poly(&self.b_coeffs, &x);
             self.shares.insert(self.me.id, (f_i, r_i));
+            self.shares_sent.insert(self.me.id, (f_i, r_i));
         }
     }
 
@@ -232,6 +244,9 @@ impl DkgState {
                 if c.coeffs.len() != self.params.t as usize {
                     return Err(Error::InvalidMessage);
                 }
+                if self.commitments.contains_key(&from) {
+                    return Err(Error::InvalidMessage);
+                }
                 if !self.verify_commitment(&c)? {
                     return Err(Error::InvalidMessage);
                 }
@@ -241,6 +256,9 @@ impl DkgState {
                     for s in pend {
                         if s.to != self.me.id {
                             continue;
+                        }
+                        if self.shares.contains_key(&from) {
+                            return Err(Error::InvalidMessage);
                         }
                         if !self.verify_share(&s)? {
                             return Err(Error::InvalidMessage);
@@ -252,6 +270,9 @@ impl DkgState {
             DkgMessage::Share(s) => {
                 // Verify signature and store share for this party.
                 if s.from != from || s.to != self.me.id {
+                    return Err(Error::InvalidMessage);
+                }
+                if self.shares.contains_key(&from) {
                     return Err(Error::InvalidMessage);
                 }
                 if self.sig_pks.contains_key(&from) {
@@ -277,7 +298,7 @@ impl DkgState {
                     .insert(c.from);
                 if c.against == self.me.id {
                     // If we are accused, open the share to all parties.
-                    if let Some((f_i, r_i)) = self.shares.get(&self.me.id) {
+                    if let Some((f_i, r_i)) = self.shares_sent.get(&c.from) {
                         let open = DkgShare {
                             from: self.me.id,
                             to: c.from,
@@ -295,6 +316,9 @@ impl DkgState {
             DkgMessage::ShareOpen(s) => {
                 // Verify opening; disqualify dealer on invalid opening.
                 if s.from != from {
+                    return Err(Error::InvalidMessage);
+                }
+                if self.invalid_dealers.contains(&s.from) {
                     return Err(Error::InvalidMessage);
                 }
                 if !self.verify_share_open(&s)? {
@@ -402,7 +426,7 @@ impl DkgState {
             share += f_i;
         }
 
-        let pk = G2Projective::identity();
+        let pk = None;
         let mut pk_shares = Vec::with_capacity(1);
         // NOTE: With Pedersen commitments, pk cannot be derived from commitments
         // alone because of the blinding term. It must be recomputed from pk_shares
@@ -846,7 +870,16 @@ impl Wire for DkgMessage {
 impl Wire for DkgPublicParams {
     fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        out.extend_from_slice(&g2_to_bytes(&self.pk));
+        match &self.pk {
+            Some(pk) => {
+                out.push(1u8);
+                out.extend_from_slice(&g2_to_bytes(pk));
+            }
+            None => {
+                out.push(0u8);
+                out.extend_from_slice(&[0u8; 96]);
+            }
+        }
         out.extend_from_slice(&enc_len(self.pk_shares.len()).expect("length must fit u32"));
         for (id, pk_i) in self.pk_shares.iter() {
             out.extend_from_slice(&id.to_be_bytes());
@@ -857,14 +890,19 @@ impl Wire for DkgPublicParams {
     }
 
     fn decode(bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() < 96 + 4 + 32 {
+        if bytes.len() < 1 + 96 + 4 + 32 {
             return Err(Error::InvalidEncoding);
         }
-        let pk = g2_from_bytes(&bytes[0..96])?;
+        let has_pk = bytes[0] == 1u8;
+        let pk = if has_pk {
+            Some(g2_from_bytes(&bytes[1..97])?)
+        } else {
+            None
+        };
         let mut len_bytes = [0u8; 4];
-        len_bytes.copy_from_slice(&bytes[96..100]);
+        len_bytes.copy_from_slice(&bytes[97..101]);
         let n = u32::from_be_bytes(len_bytes) as usize;
-        let mut offset = 100;
+        let mut offset = 101;
         let mut pk_shares = Vec::with_capacity(n);
         for _ in 0..n {
             if offset + 4 + 96 > bytes.len() {
@@ -949,31 +987,35 @@ impl DkgState {
         crate::bls::pairing(sig, &G2Projective::generator()) == crate::bls::pairing(&h, pk)
     }
 
-    fn sign_commitment(&self, mut c: DkgCommitment) -> Result<DkgMessage, Error> {
+    fn sign_commitment(&mut self, mut c: DkgCommitment) -> Result<DkgMessage, Error> {
         let payload = commitment_payload(&c);
         let digest = self.msg_hash(0, c.from, 0, &payload);
         c.sig = self.sign_digest(&digest);
+        self.msg_hashes.push(digest);
         Ok(DkgMessage::Commitment(Box::new(c)))
     }
 
-    fn sign_share(&self, mut s: DkgShare) -> Result<DkgMessage, Error> {
+    fn sign_share(&mut self, mut s: DkgShare) -> Result<DkgMessage, Error> {
         let payload = share_payload(&s);
         let digest = self.msg_hash(1, s.from, s.to, &payload);
         s.sig = self.sign_digest(&digest);
+        self.msg_hashes.push(digest);
         Ok(DkgMessage::Share(Box::new(s)))
     }
 
-    fn sign_share_open(&self, mut s: DkgShare) -> Result<DkgMessage, Error> {
+    fn sign_share_open(&mut self, mut s: DkgShare) -> Result<DkgMessage, Error> {
         let payload = share_payload(&s);
         let digest = self.msg_hash(3, s.from, s.to, &payload);
         s.sig = self.sign_digest(&digest);
+        self.msg_hashes.push(digest);
         Ok(DkgMessage::ShareOpen(Box::new(s)))
     }
 
-    fn sign_complaint(&self, mut c: DkgComplaint) -> Result<DkgMessage, Error> {
+    fn sign_complaint(&mut self, mut c: DkgComplaint) -> Result<DkgMessage, Error> {
         let payload = complaint_payload(&c);
         let digest = self.msg_hash(2, c.from, c.against, &payload);
         c.sig = self.sign_digest(&digest);
+        self.msg_hashes.push(digest);
         Ok(DkgMessage::Complaint(Box::new(c)))
     }
 

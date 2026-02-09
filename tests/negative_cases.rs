@@ -19,7 +19,7 @@ fn setup_pp_and_sks(
         .collect();
 
     let mut deliveries = Vec::new();
-    for (idx, state) in states.iter().enumerate() {
+    for (idx, state) in states.iter_mut().enumerate() {
         let dealer_id = (idx + 1) as u32;
         let out = state.initial_messages().expect("initial_messages");
         for (to, msg) in out {
@@ -54,7 +54,7 @@ fn setup_pp_and_sks(
         }
         sks.push(sk_i.clone());
     }
-    pp.pk = compute_pk_from_shares(&pp.pk_shares).expect("compute pk");
+    pp.pk = Some(compute_pk_from_shares(&pp.pk_shares).expect("compute pk"));
     (pp, sks)
 }
 
