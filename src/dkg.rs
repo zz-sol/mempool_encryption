@@ -9,6 +9,9 @@ use ff::Field;
 use group::{Curve, Group};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 use crate::bls::{g2_from_bytes, g2_to_bytes, scalar_from_id, scalar_random};
 use crate::encoding::{dec_bytes, enc_bytes, enc_len};
 use crate::lagrange::combine_g2_at_zero;
@@ -180,29 +183,68 @@ impl DkgState {
             sig_pk: self.sig_pk,
             sig: G1Projective::identity(),
         })?;
-        for to in 1..=self.params.n {
-            if to == self.me.id {
-                continue;
-            }
+        let recipients: Vec<PartyId> = (1..=self.params.n).filter(|to| *to != self.me.id).collect();
+        for to in recipients.iter().copied() {
             out.push((to, commit_msg.clone()));
         }
 
-        for to in 1..=self.params.n {
-            if to == self.me.id {
-                continue;
-            }
-            let x = scalar_from_id(to)?;
-            let f_i = eval_poly(&self.a_coeffs, &x);
-            let r_i = eval_poly(&self.b_coeffs, &x);
+        #[cfg(feature = "parallel")]
+        let share_results: Vec<(PartyId, Scalar, Scalar, [u8; 32], DkgMessage)> = recipients
+            .par_iter()
+            .map(|to| {
+                let x = scalar_from_id(*to).expect("valid id");
+                let f_i = eval_poly(&self.a_coeffs, &x);
+                let r_i = eval_poly(&self.b_coeffs, &x);
+                let mut share = DkgShare {
+                    from: self.me.id,
+                    to: *to,
+                    f_i,
+                    r_i,
+                    sig: G1Projective::identity(),
+                };
+                let payload = share_payload(&share);
+                let digest = self.msg_hash(1, share.from, share.to, &payload);
+                share.sig = self.sign_digest(&digest);
+                (
+                    share.to,
+                    f_i,
+                    r_i,
+                    digest,
+                    DkgMessage::Share(Box::new(share)),
+                )
+            })
+            .collect();
+
+        #[cfg(not(feature = "parallel"))]
+        let share_results: Vec<(PartyId, Scalar, Scalar, [u8; 32], DkgMessage)> = recipients
+            .iter()
+            .map(|to| {
+                let x = scalar_from_id(*to).expect("valid id");
+                let f_i = eval_poly(&self.a_coeffs, &x);
+                let r_i = eval_poly(&self.b_coeffs, &x);
+                let mut share = DkgShare {
+                    from: self.me.id,
+                    to: *to,
+                    f_i,
+                    r_i,
+                    sig: G1Projective::identity(),
+                };
+                let payload = share_payload(&share);
+                let digest = self.msg_hash(1, share.from, share.to, &payload);
+                share.sig = self.sign_digest(&digest);
+                (
+                    share.to,
+                    f_i,
+                    r_i,
+                    digest,
+                    DkgMessage::Share(Box::new(share)),
+                )
+            })
+            .collect();
+
+        for (to, f_i, r_i, digest, msg) in share_results {
             self.shares_sent.insert(to, (f_i, r_i));
-            // Each share is signed and sent to its recipient.
-            let msg = self.sign_share(DkgShare {
-                from: self.me.id,
-                to,
-                f_i,
-                r_i,
-                sig: G1Projective::identity(),
-            })?;
+            self.msg_hashes.push(digest);
             out.push((to, msg));
         }
         Ok(out)
@@ -343,56 +385,50 @@ impl DkgState {
         let h2 = hash_to_g2(b"MEMP-ENC-H2");
         let g2 = G2Projective::generator();
         let x_i = scalar_from_id(self.me.id)?;
+        let powers = scalar_powers(&x_i, self.params.t as usize);
 
-        for dealer in 1..=self.params.n {
-            let coeffs = match self.commitments.get(&dealer) {
-                Some(c) => c,
-                None => {
-                    self.complaints.insert(dealer);
-                    let msg = self.sign_complaint(DkgComplaint {
-                        from: self.me.id,
-                        against: dealer,
-                        sig: G1Projective::identity(),
-                    })?;
-                    for to in 1..=self.params.n {
-                        out.push((to, msg.clone()));
-                    }
-                    continue;
-                }
-            };
-            let (f_i, r_i) = match self.shares.get(&dealer) {
-                Some(v) => v,
-                None => {
-                    self.complaints.insert(dealer);
-                    let msg = self.sign_complaint(DkgComplaint {
-                        from: self.me.id,
-                        against: dealer,
-                        sig: G1Projective::identity(),
-                    })?;
-                    for to in 1..=self.params.n {
-                        out.push((to, msg.clone()));
-                    }
-                    continue;
-                }
-            };
+        let dealers: Vec<PartyId> = (1..=self.params.n).collect();
 
-            let lhs = g2 * f_i + h2 * r_i;
-            let mut rhs = G2Projective::identity();
-            let mut power = Scalar::ONE;
-            for c_k in coeffs.iter() {
-                rhs += *c_k * power;
-                power *= x_i;
+        #[cfg(feature = "parallel")]
+        let bad_shares: Vec<PartyId> = dealers
+            .par_iter()
+            .filter_map(|dealer| {
+                let coeffs = self.commitments.get(dealer)?;
+                let (f_i, r_i) = self.shares.get(dealer)?;
+                let lhs = g2 * f_i + h2 * r_i;
+                let rhs = eval_commitment_with_powers(coeffs, &powers);
+                if lhs != rhs { Some(*dealer) } else { None }
+            })
+            .collect();
+
+        #[cfg(not(feature = "parallel"))]
+        let bad_shares: Vec<PartyId> = dealers
+            .iter()
+            .filter_map(|dealer| {
+                let coeffs = self.commitments.get(dealer)?;
+                let (f_i, r_i) = self.shares.get(dealer)?;
+                let lhs = g2 * f_i + h2 * r_i;
+                let rhs = eval_commitment_with_powers(coeffs, &powers);
+                if lhs != rhs { Some(*dealer) } else { None }
+            })
+            .collect();
+
+        let bad_set: HashSet<PartyId> = bad_shares.into_iter().collect();
+        for dealer in dealers {
+            let missing_commitment = !self.commitments.contains_key(&dealer);
+            let missing_share = !self.shares.contains_key(&dealer);
+            let bad_share = bad_set.contains(&dealer);
+            if !(missing_commitment || missing_share || bad_share) {
+                continue;
             }
-            if lhs != rhs {
-                self.complaints.insert(dealer);
-                let msg = self.sign_complaint(DkgComplaint {
-                    from: self.me.id,
-                    against: dealer,
-                    sig: G1Projective::identity(),
-                })?;
-                for to in 1..=self.params.n {
-                    out.push((to, msg.clone()));
-                }
+            self.complaints.insert(dealer);
+            let msg = self.sign_complaint(DkgComplaint {
+                from: self.me.id,
+                against: dealer,
+                sig: G1Projective::identity(),
+            })?;
+            for to in 1..=self.params.n {
+                out.push((to, msg.clone()));
             }
         }
         Ok(out)
@@ -676,15 +712,38 @@ fn eval_poly(coeffs: &[Scalar], x: &Scalar) -> Scalar {
     acc
 }
 
-#[allow(dead_code)]
-fn _eval_commitment(coeffs: &[G2Projective], x: &Scalar) -> G2Projective {
-    let mut acc = G2Projective::identity();
+fn scalar_powers(x: &Scalar, n: usize) -> Vec<Scalar> {
+    let mut out = Vec::with_capacity(n);
     let mut power = Scalar::ONE;
-    for c_k in coeffs.iter() {
-        acc += *c_k * power;
+    for _ in 0..n {
+        out.push(power);
         power *= x;
     }
+    out
+}
+
+fn eval_commitment_with_powers(coeffs: &[G2Projective], powers: &[Scalar]) -> G2Projective {
+    debug_assert!(coeffs.len() <= powers.len());
+
+    #[cfg(feature = "parallel")]
+    if coeffs.len() >= 64 {
+        return coeffs
+            .par_iter()
+            .zip(powers[..coeffs.len()].par_iter())
+            .map(|(c_k, power)| *c_k * *power)
+            .reduce(G2Projective::identity, |a, b| a + b);
+    }
+
+    let mut acc = G2Projective::identity();
+    for (c_k, power) in coeffs.iter().zip(powers.iter()) {
+        acc += *c_k * *power;
+    }
     acc
+}
+
+fn eval_commitment(coeffs: &[G2Projective], x: &Scalar) -> G2Projective {
+    let powers = scalar_powers(x, coeffs.len());
+    eval_commitment_with_powers(coeffs, &powers)
 }
 
 impl Wire for DkgCommitment {
@@ -998,14 +1057,6 @@ impl DkgState {
         Ok(DkgMessage::Commitment(Box::new(c)))
     }
 
-    fn sign_share(&mut self, mut s: DkgShare) -> Result<DkgMessage, Error> {
-        let payload = share_payload(&s);
-        let digest = self.msg_hash(1, s.from, s.to, &payload);
-        s.sig = self.sign_digest(&digest);
-        self.msg_hashes.push(digest);
-        Ok(DkgMessage::Share(Box::new(s)))
-    }
-
     fn sign_share_open(&mut self, mut s: DkgShare) -> Result<DkgMessage, Error> {
         let payload = share_payload(&s);
         let digest = self.msg_hash(3, s.from, s.to, &payload);
@@ -1056,12 +1107,7 @@ impl DkgState {
         let g2 = G2Projective::generator();
         let x_i = scalar_from_id(s.to)?;
         let lhs = g2 * s.f_i + h2 * s.r_i;
-        let mut rhs = G2Projective::identity();
-        let mut power = Scalar::ONE;
-        for c_k in coeffs.iter() {
-            rhs += *c_k * power;
-            power *= x_i;
-        }
+        let rhs = eval_commitment(coeffs, &x_i);
         Ok(lhs == rhs)
     }
 

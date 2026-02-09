@@ -4,6 +4,9 @@ use blstrs::Scalar;
 use ff::Field;
 use group::Group;
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 use crate::bls::scalar_from_id;
 use crate::types::{Error, PartyId};
 
@@ -40,10 +43,26 @@ pub fn combine_g1_at_zero(
         return Err(Error::InvalidParams);
     }
     let coeffs = lagrange_coefficients_at_zero(ids)?;
-    let mut acc = blstrs::G1Projective::identity();
-    for (coeff, value) in coeffs.iter().zip(values.iter()) {
-        acc += *value * coeff;
+
+    #[cfg(feature = "parallel")]
+    {
+        let acc = coeffs
+            .par_iter()
+            .zip(values.par_iter())
+            .map(|(coeff, value)| *value * *coeff)
+            .reduce(blstrs::G1Projective::identity, |a, b| a + b);
+        return Ok(acc);
     }
+
+    #[cfg(not(feature = "parallel"))]
+    let mut acc = blstrs::G1Projective::identity();
+
+    #[cfg(not(feature = "parallel"))]
+    for (coeff, value) in coeffs.iter().zip(values.iter()) {
+        acc += *value * *coeff;
+    }
+
+    #[cfg(not(feature = "parallel"))]
     Ok(acc)
 }
 
@@ -56,9 +75,25 @@ pub fn combine_g2_at_zero(
         return Err(Error::InvalidParams);
     }
     let coeffs = lagrange_coefficients_at_zero(ids)?;
-    let mut acc = blstrs::G2Projective::identity();
-    for (coeff, value) in coeffs.iter().zip(values.iter()) {
-        acc += *value * coeff;
+
+    #[cfg(feature = "parallel")]
+    {
+        let acc = coeffs
+            .par_iter()
+            .zip(values.par_iter())
+            .map(|(coeff, value)| *value * *coeff)
+            .reduce(blstrs::G2Projective::identity, |a, b| a + b);
+        return Ok(acc);
     }
+
+    #[cfg(not(feature = "parallel"))]
+    let mut acc = blstrs::G2Projective::identity();
+
+    #[cfg(not(feature = "parallel"))]
+    for (coeff, value) in coeffs.iter().zip(values.iter()) {
+        acc += *value * *coeff;
+    }
+
+    #[cfg(not(feature = "parallel"))]
     Ok(acc)
 }
