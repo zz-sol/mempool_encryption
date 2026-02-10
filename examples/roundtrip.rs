@@ -117,14 +117,20 @@ fn main() {
     tracing::info!("ciphertext created");
 
     // Parties produce partial signatures for the tag.
-    let sig1 = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk1, &tag).expect("sig1");
-    let sig2 = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk2, &tag).expect("sig2");
+    let sig1 =
+        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk1, &tag, &ct).expect("sig1");
+    let sig2 =
+        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk2, &tag, &ct).expect("sig2");
     tracing::info!("partial signatures produced");
 
     // Combine t partials to obtain the full signature.
-    let full =
-        <BlsDkgScheme as ThresholdRelease>::combine(&pp, &tag, &[(sk1.id, sig1), (sk2.id, sig2)])
-            .expect("combine");
+    let full = <BlsDkgScheme as ThresholdRelease>::combine(
+        &pp,
+        &tag,
+        &ct,
+        &[(sk1.id, sig1), (sk2.id, sig2)],
+    )
+    .expect("combine");
     tracing::info!("full signature combined");
 
     // Anyone can decrypt once the full signature is published.

@@ -70,8 +70,10 @@ fn usage() {
     eprintln!("  broadcast --from <id> --to <id,id,..> --root <dir>");
     eprintln!("  deliver-outbox --from <id> --root <dir>");
     eprintln!("  encrypt --pub <file> --tag <b64> --in <file> --out <file>");
-    eprintln!("  partial-release --secret <file> --pub <file> --tag <b64> --out <file>");
-    eprintln!("  combine --tag <b64> --partials <dir> --pub <file> --out <file>");
+    eprintln!(
+        "  partial-release --secret <file> --pub <file> --tag <b64> --ct <file> --out <file>"
+    );
+    eprintln!("  combine --tag <b64> --ct <file> --partials <dir> --pub <file> --out <file>");
     eprintln!("  decrypt --pub <file> --tag <b64> --ct <file> --witness <file> --out <file>");
     eprintln!("  public-merge --root <dir> --n <n> --out <file>");
 }
@@ -206,13 +208,15 @@ fn cmd_partial_release(args: &[String]) {
     let secret_path = get_path(args, "--secret").expect("--secret");
     let tag_b64 = get_str(args, "--tag").expect("--tag");
     let pub_path = get_path(args, "--pub").expect("--pub");
+    let ct_path = get_path(args, "--ct").expect("--ct");
     let out_path = get_path(args, "--out").expect("--out");
 
     let sk = load_secret(&secret_path).expect("load secret");
     let pp = load_public(&pub_path).expect("load public");
+    let ct = load_ciphertext(&ct_path).expect("load ct");
 
     let tag = BlsTag(decode_b64(&tag_b64).expect("tag"));
-    let sig = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk, &tag)
+    let sig = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk, &tag, &ct)
         .expect("partial_release");
 
     let sig_b64 = STANDARD.encode(sig.encode());
@@ -222,11 +226,13 @@ fn cmd_partial_release(args: &[String]) {
 
 fn cmd_combine(args: &[String]) {
     let tag_b64 = get_str(args, "--tag").expect("--tag");
+    let ct_path = get_path(args, "--ct").expect("--ct");
     let partials_dir = get_path(args, "--partials").expect("--partials");
     let pub_path = get_path(args, "--pub").expect("--pub");
     let out_path = get_path(args, "--out").expect("--out");
 
     let tag = BlsTag(decode_b64(&tag_b64).expect("tag"));
+    let ct = load_ciphertext(&ct_path).expect("load ct");
 
     let mut partials = Vec::new();
     for entry in fs::read_dir(partials_dir).expect("partials").flatten() {
@@ -244,7 +250,8 @@ fn cmd_combine(args: &[String]) {
     }
 
     let pp = load_public(&pub_path).expect("public");
-    let full = <BlsDkgScheme as ThresholdRelease>::combine(&pp, &tag, &partials).expect("combine");
+    let full =
+        <BlsDkgScheme as ThresholdRelease>::combine(&pp, &tag, &ct, &partials).expect("combine");
     let out_b64 = STANDARD.encode(full.encode());
     let mut f = File::create(out_path).expect("out");
     let _ = f.write_all(out_b64.as_bytes());
@@ -409,6 +416,14 @@ fn load_public(path: &Path) -> Result<DkgPublicParams, Error> {
         pk_shares,
         transcript_hash: th,
     })
+}
+
+fn load_ciphertext(path: &Path) -> Result<BlsCiphertext, Error> {
+    let ct_b64 = read_string(path);
+    let ct_bytes = STANDARD
+        .decode(ct_b64.as_bytes())
+        .map_err(|_| Error::InvalidEncoding)?;
+    BlsCiphertext::decode(&ct_bytes)
 }
 
 fn load_secret(path: &Path) -> Result<DkgPartySecret, Error> {

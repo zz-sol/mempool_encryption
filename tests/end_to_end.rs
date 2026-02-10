@@ -63,17 +63,23 @@ fn dkg_encrypt_decrypt_roundtrip() {
     let ct =
         <BlsDkgScheme as ThresholdRelease>::encrypt(&pp, &tag, &pt, &mut rng).expect("encrypt");
 
-    let sig1 = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk1, &tag).expect("sig1");
-    let sig2 = <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk2, &tag).expect("sig2");
+    let sig1 =
+        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk1, &tag, &ct).expect("sig1");
+    let sig2 =
+        <BlsDkgScheme as ThresholdRelease>::partial_release(&pp, &sk2, &tag, &ct).expect("sig2");
 
-    <BlsDkgScheme as ThresholdRelease>::verify_partial(&pp, &tag, sk1.id, &sig1)
+    <BlsDkgScheme as ThresholdRelease>::verify_partial(&pp, &tag, &ct, sk1.id, &sig1)
         .expect("verify sig1");
-    <BlsDkgScheme as ThresholdRelease>::verify_partial(&pp, &tag, sk2.id, &sig2)
+    <BlsDkgScheme as ThresholdRelease>::verify_partial(&pp, &tag, &ct, sk2.id, &sig2)
         .expect("verify sig2");
 
-    let full =
-        <BlsDkgScheme as ThresholdRelease>::combine(&pp, &tag, &[(sk1.id, sig1), (sk2.id, sig2)])
-            .expect("combine");
+    let full = <BlsDkgScheme as ThresholdRelease>::combine(
+        &pp,
+        &tag,
+        &ct,
+        &[(sk1.id, sig1), (sk2.id, sig2)],
+    )
+    .expect("combine");
 
     let out = <BlsDkgScheme as ThresholdRelease>::decrypt(&pp, &tag, &ct, &full).expect("decrypt");
 

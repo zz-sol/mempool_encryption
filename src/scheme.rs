@@ -10,9 +10,18 @@ pub trait SetupProtocol {
     type PartySecret: Wire + Clone;
     type SetupMessage: Wire + Clone;
     type SetupState;
+    type SetupConfig;
 
     // Initialize local protocol state for one party.
-    fn init(params: Params, me: PartyInfo) -> Self::SetupState;
+    fn init(params: Params, me: PartyInfo) -> Self::SetupState {
+        Self::init_with(params, me, Self::default_config())
+    }
+
+    // Initialize local protocol state with scheme-specific configuration.
+    fn init_with(params: Params, me: PartyInfo, config: Self::SetupConfig) -> Self::SetupState;
+
+    // Default configuration for schemes that do not need extra inputs.
+    fn default_config() -> Self::SetupConfig;
 
     // Process an incoming message and return any outgoing messages.
     fn handle_message(
@@ -56,12 +65,14 @@ pub trait ThresholdRelease {
         pp: &Self::PublicParams,
         sk_i: &Self::PartySecret,
         tag: &Self::ReleaseTag,
+        ct: &Self::Ciphertext,
     ) -> Result<Self::PartialWitness, Error>;
 
     // Verify a partial release against the sender's public share.
     fn verify_partial(
         pp: &Self::PublicParams,
         tag: &Self::ReleaseTag,
+        ct: &Self::Ciphertext,
         from: PartyId,
         w: &Self::PartialWitness,
     ) -> Result<(), Error>;
@@ -70,6 +81,7 @@ pub trait ThresholdRelease {
     fn combine(
         pp: &Self::PublicParams,
         tag: &Self::ReleaseTag,
+        ct: &Self::Ciphertext,
         partials: &[(PartyId, Self::PartialWitness)],
     ) -> Result<Self::FullWitness, Error>;
 

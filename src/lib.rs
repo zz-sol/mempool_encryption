@@ -12,9 +12,11 @@ pub mod kem;
 pub mod lagrange;
 pub mod logging;
 pub mod scheme;
+pub mod tess_adapter;
 pub mod transport;
 pub mod types;
 mod wire_impls;
 
 pub use crate::scheme::{MempoolEncryptionScheme, SetupProtocol, ThresholdRelease};
+pub use crate::tess_adapter::{TessScheme, TessSetupConfig};
 pub use crate::types::{Error, Params, PartyId, PartyInfo, Wire};
