@@ -22,7 +22,7 @@ struct WireMessage {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct PublicParamsJson {
-    pk_b64: String,
+    pk_b64: Option<String>,
     pk_shares: Vec<(u32, String)>,
     transcript_hash_b64: String,
 }
@@ -283,7 +283,7 @@ fn cmd_public_merge(args: &[String]) {
         transcript_hash,
     };
     let json = serde_json::to_string_pretty(&PublicParamsJson {
-        pk_b64: STANDARD.encode(merged.pk.as_ref().expect("pk").encode()),
+        pk_b64: Some(STANDARD.encode(merged.pk.as_ref().expect("pk").encode())),
         pk_shares: merged
             .pk_shares
             .iter()
@@ -349,8 +349,7 @@ fn load_state(root: &Path, id: u32) -> Result<DkgState, Error> {
 
 fn save_public(root: &Path, id: u32, pp: &DkgPublicParams) -> Result<(), Error> {
     let dir = party_dir(root, id);
-    let pk = pp.pk.as_ref().ok_or(Error::InvalidParams)?;
-    let pk_b64 = STANDARD.encode(pk.encode());
+    let pk_b64 = pp.pk.as_ref().map(|pk| STANDARD.encode(pk.encode()));
     let pk_shares = pp
         .pk_shares
         .iter()
@@ -385,10 +384,14 @@ fn save_secret(root: &Path, id: u32, sk: &DkgPartySecret) -> Result<(), Error> {
 fn load_public(path: &Path) -> Result<DkgPublicParams, Error> {
     let json = read_string(path);
     let pp: PublicParamsJson = serde_json::from_str(&json).map_err(|_| Error::InvalidEncoding)?;
-    let pk_bytes = STANDARD
-        .decode(pp.pk_b64.as_bytes())
-        .map_err(|_| Error::InvalidEncoding)?;
-    let pk = mempool_encryption::bls::g2_from_bytes(&pk_bytes)?;
+    let pk = if let Some(pk_b64) = pp.pk_b64.as_ref() {
+        let pk_bytes = STANDARD
+            .decode(pk_b64.as_bytes())
+            .map_err(|_| Error::InvalidEncoding)?;
+        Some(mempool_encryption::bls::g2_from_bytes(&pk_bytes)?)
+    } else {
+        None
+    };
     let pk_shares = pp
         .pk_shares
         .iter()
@@ -409,7 +412,7 @@ fn load_public(path: &Path) -> Result<DkgPublicParams, Error> {
     let mut th = [0u8; 32];
     th.copy_from_slice(&th_bytes);
     Ok(DkgPublicParams {
-        pk: Some(pk),
+        pk,
         pk_shares,
         transcript_hash: th,
     })

@@ -30,7 +30,7 @@ tess = { git = "https://github.com/zz-sol/Tess", default-features = false, featu
 # Additional deps needed for spec (HKDF + AEAD)
 hkdf = "0.12"
 sha2 = "0.10"
-chacha20poly1305 = { version = "0.10", features = ["std"] }
+aes-gcm = { version = "0.10", features = ["std"] }
 
 [dev-dependencies]
 rand = "0.8"
