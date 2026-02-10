@@ -60,11 +60,11 @@ cargo run --release --bin mempool-encrypt -- encrypt --pub "$ROOT/public.json" -
 # Partial releases from first T parties
 rm -rf "$ROOT/partials" && mkdir -p "$ROOT/partials"
 for i in $(seq 1 "$T"); do
-  cargo run --release --bin mempool-encrypt -- partial-release --secret "$ROOT/party_$(printf '%02d' "$i")/secret.json" --pub "$ROOT/public.json" --tag "$TAG_B64" --out "$ROOT/partials/partial_${i}.b64"
+  cargo run --release --bin mempool-encrypt -- partial-release --secret "$ROOT/party_$(printf '%02d' "$i")/secret.json" --pub "$ROOT/public.json" --tag "$TAG_B64" --ct "$ROOT/cipher.txt" --out "$ROOT/partials/partial_${i}.b64"
 done
 
 # Combine
-cargo run --release --bin mempool-encrypt -- combine --tag "$TAG_B64" --partials "$ROOT/partials" --pub "$ROOT/public.json" --out "$ROOT/witness.b64"
+cargo run --release --bin mempool-encrypt -- combine --tag "$TAG_B64" --ct "$ROOT/cipher.txt" --partials "$ROOT/partials" --pub "$ROOT/public.json" --out "$ROOT/witness.b64"
 
 # Decrypt
 cargo run --release --bin mempool-encrypt -- decrypt --pub "$ROOT/public.json" --tag "$TAG_B64" --ct "$ROOT/cipher.txt" --witness "$ROOT/witness.b64" --out "$ROOT/plain_out.txt"
